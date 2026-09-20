@@ -1,0 +1,52 @@
+{
+  "name": "Bot WhatsApp Digiflazz PPOB & Topup Otomatis",
+  "slug": "bot-digiflazz-v1",
+  "category": "PPOB",
+  "version": "1.0.0",
+  "description": "Template bot WhatsApp resmi untuk transaksi produk PPOB, pulsa, paket data, dan voucher game via Digiflazz dengan QRIS otomatis.",
+  "features": [
+    "Transaksi PPOB & Topup Game Otomatis Digiflazz",
+    "Integrasi Pembayaran QRIS Otomatis",
+    "Normalisasi Full LID to JID Tanpa Saldo Nyangkut",
+    "Fitur Moderasi Grup Lengkap (Kick, Promote, Hidetag)",
+    "Pencadangan Sesi WhatsApp Otomatis (Zero Re-scan)",
+    "Sinkronisasi Pengaturan Dua Arah FENBOT Cloud"
+  ],
+  "settings": [
+    {
+      "key": "digiflazz_username",
+      "label": "Username Digiflazz",
+      "type": "string",
+      "required": true,
+      "placeholder": "Username akun Digiflazz Anda"
+    },
+    {
+      "key": "digiflazz_api_key",
+      "label": "Production API Key Digiflazz",
+      "type": "password",
+      "required": true,
+      "placeholder": "dev-xxxxxxxx atau prod-xxxxxxxx"
+    },
+    {
+      "key": "profit_markup",
+      "label": "Markup Keuntungan per Transaksi (Rp)",
+      "type": "number",
+      "required": false,
+      "defaultValue": 500
+    },
+    {
+      "key": "store_name",
+      "label": "Nama Toko / Usaha",
+      "type": "string",
+      "required": false,
+      "placeholder": "Contoh: FENBOT CELL"
+    },
+    {
+      "key": "admin_phone",
+      "label": "Nomor WhatsApp Admin",
+      "type": "string",
+      "required": false,
+      "placeholder": "628xxxxxxxxxx"
+    }
+  ]
+}
