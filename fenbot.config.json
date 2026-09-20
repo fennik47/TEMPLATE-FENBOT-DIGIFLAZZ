@@ -68,11 +68,12 @@
     },
     {
       "key": "profit_markup",
-      "label": "Markup Keuntungan Tambahan per Transaksi (Rp)",
+      "label": "Margin Keuntungan (%)",
       "type": "number",
       "required": false,
-      "defaultValue": 0,
-      "placeholder": "0"
+      "defaultValue": 5,
+      "placeholder": "5",
+      "description": "Persentase keuntungan yang otomatis ditambahkan ke harga modal Digiflazz (contoh: isi 5 untuk margin 5%)."
     },
     {
       "key": "payment_bank",

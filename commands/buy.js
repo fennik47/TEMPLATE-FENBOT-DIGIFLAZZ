@@ -47,9 +47,10 @@ Pusat (Seller) untuk produk *${sku}* sedang mengalami gangguan atau stok kosong.
 
         const settings = db.getSettings();
         const user = db.getUser(jid);
-        const markup = settings.margins[user.role] || settings.margins.BRONZE;
-        const flatProfit = typeof config.profit === "number" ? config.profit : (settings.profit_markup || 0);
-        const adjustedPrice = Math.ceil(product.price * (1 + markup)) + flatProfit;
+        const markup = (settings.margins && typeof settings.margins[user.role] === 'number')
+            ? settings.margins[user.role]
+            : (settings.margins ? settings.margins.BRONZE : 0.05);
+        const adjustedPrice = Math.ceil(product.price * (1 + markup));
 
         if (user.balance < adjustedPrice) {
             return sock.reply(m.chat, `Saldo tidak cukup!\nHarga: Rp${adjustedPrice.toLocaleString()}\nSaldo Anda: Rp${user.balance.toLocaleString()}\n\nSilakan topup saldo ke admin.`, m);
