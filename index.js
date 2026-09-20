@@ -18,6 +18,7 @@ const config = require("./config/config");
 const { getWIBTime } = require("./lib/helper");
 const qrcode = require("qrcode-terminal");
 const db = require("./lib/db");
+const fenbot = require("./lib/fenbot");
 
 const question = (text) => {
     const rl = readline.createInterface({
@@ -98,6 +99,7 @@ server.listen(PORT, () => {
 });
 
 async function startBot() {
+    await fenbot.syncSettings(config);
     const { state, saveCreds } = await useMultiFileAuthState("session");
     const { version } = await fetchLatestBaileysVersion();
 
@@ -144,7 +146,7 @@ async function startBot() {
     sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr && loginChoice === "1") {
+        if (qr && (loginChoice === "1" || !loginChoice || !process.stdin.isTTY)) {
             console.log(chalk.blue("[ INFO ] Scan QR Code di bawah untuk login:"));
             qrcode.generate(qr, { small: true });
         }
@@ -178,6 +180,10 @@ async function startBot() {
 
             console.log(chalk.green.bold("\n[ CONNECT ] Connected to WhatsApp"));
             console.log(chalk.white(`[ TIME ] ${getWIBTime()} WIB\n`));
+
+            // Mulai Liveness Heartbeat & Auto Session Backup untuk FENBOT Cloud
+            fenbot.startHeartbeat(() => botStatus);
+            fenbot.startSessionSync("session");
 
             try {
                 const groups = await sock.groupFetchAllParticipating();
@@ -221,26 +227,45 @@ async function startBot() {
     });
 
     if (!sock.authState.creds.registered) {
-        console.log(chalk.cyan.bold("\n[ LOGIN ] Pilih metode login:"));
-        console.log(chalk.white("1. QR Code"));
-        console.log(chalk.white("2. Pairing Code"));
+        const envPhone = process.env.PAIRING_NUMBER || process.env.WA_PHONE || process.env.PHONE_NUMBER;
+        const envMethod = process.env.LOGIN_METHOD || (envPhone ? "2" : "");
 
-        loginChoice = await question(chalk.yellow("Masukkan pilihan (1/2): "));
-
-        if (loginChoice === "2") {
-            const phoneNumber = await question(chalk.yellow("Masukkan nomor WhatsApp (contoh: 628xxx): "));
-            if (!phoneNumber) {
-                console.log(chalk.red("[ ERROR ] Nomor tidak boleh kosong!"));
-                process.exit();
+        if (envMethod === "2" && envPhone) {
+            loginChoice = "2";
+            const cleanPhone = envPhone.replace(/[^0-9]/g, "");
+            console.log(chalk.cyan.bold(`\n[ LOGIN ] Mode Pairing Otomatis untuk nomor: ${cleanPhone}`));
+            try {
+                const code = await sock.requestPairingCode(cleanPhone);
+                console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
+                console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
+            } catch (err) {
+                console.error(chalk.red(`[ PAIRING ERROR ] Gagal meminta pairing code: ${err.message}`));
             }
-            const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
-            console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
-            console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
-        } else if (loginChoice === "1") {
-            console.log(chalk.blue("\n[ INFO ] Menunggu QR Code muncul..."));
+        } else if (!process.stdin.isTTY || process.env.HEADLESS === "true") {
+            loginChoice = "1";
+            console.log(chalk.blue("\n[ INFO ] Menjalankan mode container / headless, menunggu QR Code..."));
         } else {
-            console.log(chalk.red("[ ERROR ] Pilihan tidak valid!"));
-            process.exit();
+            console.log(chalk.cyan.bold("\n[ LOGIN ] Pilih metode login:"));
+            console.log(chalk.white("1. QR Code"));
+            console.log(chalk.white("2. Pairing Code"));
+
+            loginChoice = await question(chalk.yellow("Masukkan pilihan (1/2): "));
+
+            if (loginChoice === "2") {
+                const phoneNumber = await question(chalk.yellow("Masukkan nomor WhatsApp (contoh: 628xxx): "));
+                if (!phoneNumber) {
+                    console.log(chalk.red("[ ERROR ] Nomor tidak boleh kosong!"));
+                    process.exit();
+                }
+                const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
+                console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
+                console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
+            } else if (loginChoice === "1") {
+                console.log(chalk.blue("\n[ INFO ] Menunggu QR Code muncul..."));
+            } else {
+                console.log(chalk.red("[ ERROR ] Pilihan tidak valid, default ke QR Code!"));
+                loginChoice = "1";
+            }
         }
     }
     const startTime = Math.floor(Date.now() / 1000);

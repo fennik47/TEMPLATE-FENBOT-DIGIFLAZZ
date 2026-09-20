@@ -19,7 +19,6 @@ module.exports = {
 ┃ • .payment
 ┃ • .owner
 ┃ • .getlid
-┃ • .tourl (Image to URL)
 ╰────────────────╯
 
 ╭──〔 𝗠𝗘𝗡𝗨 𝗢𝗪𝗡𝗘𝗥 〕──╮
@@ -43,9 +42,7 @@ module.exports = {
 ┃ • .addlist / .dellist
 ┃ • .proses / .done
 ┃ • .hidetag
-┃ • .linkgc
 ┃ • .group [open/close]
-┃ • .antilink [on/off]
 ┃ • .kick
 ┃ • .promote
 ┃ • .join

@@ -131,23 +131,6 @@ module.exports = async (sock, m) => {
             return sock.reply(chat, "Halo juga 👋", m);
         }
 
-        const urlRegex = /https?:\/\/[^\s]+|www\.[^\s]+|chat.whatsapp.com\/[^\s]+/gi;
-        if (isGroup && body && urlRegex.test(body)) {
-            const groupSettings = db.getGroupSettings(chat);
-            if (groupSettings.antilink) {
-                if (!m.isAdmin && !isOwner) {
-                    if (m.isBotAdmin) {
-                        await sock.sendMessage(chat, { delete: m.key });
-                        await sock.groupParticipantsUpdate(chat, [sender], "remove");
-                        await sock.reply(chat, `🚫 *ANTILINK DETECTED*\n\nPesan dihapus dan member @${sender.split("@")[0]} telah dikeluarkan karena mengirim link!`, null, { mentions: [sender] });
-                    } else {
-                        await sock.reply(chat, `⚠️ *Peringatan Antilink*\n\nBot mendeteksi link, tapi tidak bisa menghapus pesan atau kick member karena bot bukan Admin!`, m);
-                    }
-                    return;
-                }
-            }
-        }
-
     } catch (err) {
         console.log(chalk.red("[ ERROR ] " + err));
     }
