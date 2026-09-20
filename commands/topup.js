@@ -90,8 +90,11 @@ module.exports = {
         txt += `👤 *Role:* ${user.role}\n`;
         txt += `📊 *Total:* ${finalProducts.length} Produk\n\n`;
         
+        const config = require('../config/config');
+        const flatProfit = typeof config.profit === "number" ? config.profit : (settings.profit_markup || 0);
+
         finalProducts.sort((a, b) => a.price - b.price).forEach(p => {
-            const price = Math.ceil(p.price * (1 + markup));
+            const price = Math.ceil(p.price * (1 + markup)) + flatProfit;
             const status = p.seller_product_status ? '✅' : '❌';
             txt += `*${p.product_name}*\n`;
             txt += `└ SKU: \`${p.buyer_sku_code}\`\n`;

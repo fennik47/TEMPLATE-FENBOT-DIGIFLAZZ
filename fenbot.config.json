@@ -14,6 +14,45 @@
   ],
   "settings": [
     {
+      "key": "store_name",
+      "label": "Nama Toko / Usaha",
+      "type": "string",
+      "required": true,
+      "defaultValue": "FENBOT CELL",
+      "placeholder": "Contoh: FENBOT CELL"
+    },
+    {
+      "key": "bot_name",
+      "label": "Nama Bot WhatsApp",
+      "type": "string",
+      "required": true,
+      "defaultValue": "FENBOT Assistant",
+      "placeholder": "Contoh: FENBOT Assistant"
+    },
+    {
+      "key": "owner_name",
+      "label": "Nama Pemilik / Owner",
+      "type": "string",
+      "required": false,
+      "defaultValue": "Owner",
+      "placeholder": "Contoh: Fennik"
+    },
+    {
+      "key": "admin_phone",
+      "label": "Nomor WhatsApp Owner",
+      "type": "string",
+      "required": true,
+      "placeholder": "Format: 628xxxxxxxxxx"
+    },
+    {
+      "key": "prefix",
+      "label": "Prefix Perintah Bot",
+      "type": "string",
+      "required": false,
+      "defaultValue": ".",
+      "placeholder": "Contoh: . atau !"
+    },
+    {
       "key": "digiflazz_username",
       "label": "Username Digiflazz",
       "type": "string",
@@ -29,24 +68,33 @@
     },
     {
       "key": "profit_markup",
-      "label": "Markup Keuntungan per Transaksi (Rp)",
+      "label": "Markup Keuntungan Tambahan per Transaksi (Rp)",
       "type": "number",
       "required": false,
-      "defaultValue": 500
+      "defaultValue": 0,
+      "placeholder": "0"
     },
     {
-      "key": "store_name",
-      "label": "Nama Toko / Usaha",
+      "key": "payment_bank",
+      "label": "Bank / E-Wallet Pembayaran",
       "type": "string",
       "required": false,
-      "placeholder": "Contoh: FENBOT CELL"
+      "defaultValue": "DANA",
+      "placeholder": "Contoh: DANA, BCA, Mandiri"
     },
     {
-      "key": "admin_phone",
-      "label": "Nomor WhatsApp Admin",
+      "key": "payment_number",
+      "label": "Nomor Rekening / E-Wallet",
       "type": "string",
       "required": false,
-      "placeholder": "628xxxxxxxxxx"
+      "placeholder": "Contoh: 085797195435"
+    },
+    {
+      "key": "payment_name",
+      "label": "Atas Nama Pemilik Rekening",
+      "type": "string",
+      "required": false,
+      "placeholder": "Contoh: Kherul Anam"
     }
   ]
 }
