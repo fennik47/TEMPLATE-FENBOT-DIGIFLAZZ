@@ -96,32 +96,39 @@ module.exports = async (sock, m) => {
                 if (body.toLowerCase() === "tidak") return sock.reply(chat, "❌ Pesanan dibatalkan.", m);
 
                 const digiflazz = require('./lib/digiflazz');
-                const user = db.getUser(userId);
+                const user = await db.getUserAsync(userId);
                 if (user.balance < data.price) return sock.reply(chat, "❌ Saldo tidak cukup.", m);
 
                 const refId = `TRX${Date.now()}${Math.floor(Math.random() * 1000)}`;
                 try {
-                    const balanceAfter = user.balance - data.price;
-                    db.updateUser(userId, { balance: balanceAfter });
+                    // 1. Reserve balance via FENBOT CLOUD ACID row locking
+                    await db.reserveBalance(userId, data.price);
+
+                    await sock.reply(chat, `⏳ Pesanan diterima!\nID: ${refId}\nProduk: ${data.product_name}`, m);
+                    
+                    // 2. Execute fulfillment with Digiflazz API
+                    const result = await digiflazz.topup(data.sku, data.target, refId);
+                    
+                    if (result.status === 'Gagal') {
+                        // Release reservation if Digiflazz fails (Instant Auto-Refund)
+                        await db.releaseReservation(userId, data.price);
+                        db.updateTransaction(refId, { status: 'failed', note: result.message });
+                        return sock.reply(chat, `❌ Gagal: ${result.message}\nSaldo Anda telah dikembalikan secara otomatis.`, m);
+                    }
+
+                    // 3. Commit debit and record order in FENBOT CLOUD
+                    await db.commitDebit(userId, data.price);
+                    const updatedUser = await db.getUserAsync(userId);
                     db.addTransaction(refId, {
                         user: userId, sku: data.sku, product_name: data.product_name, target: data.target,
                         price: data.price, modal: data.modal, balance_before: data.balance_before,
-                        balance_after: balanceAfter, status: 'pending', chat: data.chat || chat
+                        balance_after: updatedUser.balance, status: result.status.toLowerCase(),
+                        note: result.message, chat: data.chat || chat
                     });
-                    await sock.reply(chat, `⏳ Pesanan diterima!\nID: ${refId}\nProduk: ${data.product_name}`, m);
-                    const result = await digiflazz.topup(data.sku, data.target, refId);
-                    if (result.status === 'Gagal') {
-                        const currentUser = db.getUser(userId);
-                        db.updateUser(userId, { balance: currentUser.balance + data.price });
-                        db.updateTransaction(refId, { status: 'failed', note: result.message });
-                        return sock.reply(chat, `❌ Gagal: ${result.message}`, m);
-                    }
-                    db.updateTransaction(refId, { status: result.status.toLowerCase(), note: result.message });
                 } catch (err) {
-                    const currentUser = db.getUser(userId);
-                    db.updateUser(userId, { balance: currentUser.balance + data.price });
+                    await db.releaseReservation(userId, data.price);
                     db.updateTransaction(refId, { status: 'failed', note: err.message || 'Kesalahan sistem' });
-                    return sock.reply(chat, `❌ Kesalahan sistem: Gagal memproses pesanan. Saldo dikembalikan.`, m);
+                    return sock.reply(chat, `❌ Kesalahan sistem: Gagal memproses pesanan (${err.message || 'Error'}). Saldo dikembalikan.`, m);
                 }
                 return;
             }

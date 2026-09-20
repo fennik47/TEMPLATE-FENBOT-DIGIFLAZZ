@@ -46,7 +46,7 @@ Pusat (Seller) untuk produk *${sku}* sedang mengalami gangguan atau stok kosong.
         }
 
         const settings = db.getSettings();
-        const user = db.getUser(jid);
+        const user = await db.getUserAsync(jid);
         const markup = (settings.margins && typeof settings.margins[user.role] === 'number')
             ? settings.margins[user.role]
             : (settings.margins ? settings.margins.BRONZE : 0.05);

@@ -1,4 +1,6 @@
-require('dotenv').config();
+try {
+    require('dotenv').config();
+} catch {}
 
 const parseList = (str, defaultList) => {
     if (!str) return defaultList;
