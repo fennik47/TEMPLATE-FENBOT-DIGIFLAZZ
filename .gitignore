@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+firebase-key.json
+
+# WhatsApp Auth Session
+session/
+
+# User Data & Transactions (Privacy / Security)
+database/users.json
+database/transactions.json
+database/groups.json
+database/sewa_panel.json
+database/lid_map.json
+
+# Temporary files & Logs
+temp/
+*.log
+*.zip
+*.bak
+
+# OS Files
+.DS_Store
+Thumbs.db

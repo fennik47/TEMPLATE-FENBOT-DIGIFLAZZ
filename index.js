@@ -1,0 +1,440 @@
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
+    Browsers
+} = require("@whiskeysockets/baileys");
+const pino = require("pino");
+const chalk = require("chalk");
+const { Boom } = require("@hapi/boom");
+const fs = require("fs-extra");
+const http = require("http");
+const readline = require("readline");
+const { serialize, decodeJid } = require("./lib/serializer");
+const lidHelper = require("./lib/lidHelper");
+const config = require("./config/config");
+const { getWIBTime } = require("./lib/helper");
+const qrcode = require("qrcode-terminal");
+const db = require("./lib/db");
+
+const question = (text) => {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+    return new Promise((resolve) => {
+        rl.question(text, (answer) => {
+            rl.close();
+            resolve(answer);
+        });
+    });
+};
+
+const messageCache = new Set();
+let botStatus = {
+    connected: false,
+    startedAt: new Date().toISOString(),
+    phone: ''
+};
+
+const PORT = process.env.PORT || 3000;
+const server = http.createServer((req, res) => {
+    if (req.url === '/api/status' || req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        const dbData = db.readDB();
+        return res.end(JSON.stringify({
+            status: 'ok',
+            bot: botStatus.connected ? 'connected' : 'connecting',
+            time: getWIBTime(),
+            products: (dbData.products || []).length,
+            users: Object.keys(dbData.users || {}).length
+        }));
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    const dbData = db.readDB();
+    const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${config.botName || 'Bot Store'} - Status</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+        .card { max-width: 640px; margin: 40px auto; background: #1e293b; border-radius: 12px; padding: 28px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); border: 1px solid #334155; }
+        h1 { margin-top: 0; font-size: 24px; color: #38bdf8; }
+        .status-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 14px; background: ${botStatus.connected ? '#166534; color: #86efac' : '#854d0e; color: #fde047'}; }
+        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 20px; }
+        .stat-item { background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; }
+        .stat-label { font-size: 12px; color: #94a3b8; }
+        .stat-val { font-size: 18px; font-weight: bold; margin-top: 4px; color: #f1f5f9; }
+        .footer { margin-top: 24px; font-size: 12px; color: #64748b; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>${config.storeName || 'Store Bot'}</h1>
+        <p>WhatsApp Bot Management &amp; Gateway H2H Digiflazz</p>
+        <div>
+            Status: <span class="status-badge">${botStatus.connected ? 'ONLINE / CONNECTED' : 'INITIALIZING / CONNECTING'}</span>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-item"><div class="stat-label">WAKTU SERVER</div><div class="stat-val">${getWIBTime()} WIB</div></div>
+            <div class="stat-item"><div class="stat-label">TOTAL PRODUK</div><div class="stat-val">${(dbData.products || []).length} SKU</div></div>
+            <div class="stat-item"><div class="stat-label">TOTAL PENGGUNA</div><div class="stat-val">${Object.keys(dbData.users || {}).length} User</div></div>
+            <div class="stat-item"><div class="stat-label">BOT NUMBER</div><div class="stat-val">${botStatus.phone || '-'}</div></div>
+        </div>
+        <div class="footer">Server berjalan aktif pada port ${PORT}</div>
+    </div>
+</body>
+</html>`;
+    res.end(html);
+});
+
+server.listen(PORT, () => {
+    console.log(chalk.cyan(`[ WEB ] Server berjalan di http://localhost:${PORT}`));
+});
+
+async function startBot() {
+    const { state, saveCreds } = await useMultiFileAuthState("session");
+    const { version } = await fetchLatestBaileysVersion();
+
+    const logger = pino({ level: "silent" });
+
+    const sock = makeWASocket({
+        version,
+        logger,
+        printQRInTerminal: false,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, logger),
+        },
+        browser: Browsers.ubuntu("Chrome"),
+        syncFullHistory: false,
+        markOnline: true,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000,
+        getMessage: async () => {
+            return { conversation: "" };
+        },
+    });
+
+    const autoSyncPricelist = async () => {
+        try {
+            const digiflazz = require('./lib/digiflazz');
+            if (config.digiflazz.apiKey && config.digiflazz.apiKey !== 'YOUR_API_KEY') {
+                const products = await digiflazz.getPriceList();
+                if (products && Array.isArray(products)) {
+                    db.updateProducts(products);
+                    console.log(chalk.green(`[ AUTO-SYNC ] Berhasil memperbarui ${products.length} produk Digiflazz.`));
+                }
+            }
+        } catch (err) {
+            console.log(chalk.red(`[ AUTO-SYNC ] Gagal: ${err.message}`));
+        }
+    };
+
+    sock.ev.on("creds.update", saveCreds);
+
+    let loginChoice = null;
+
+    sock.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr && loginChoice === "1") {
+            console.log(chalk.blue("[ INFO ] Scan QR Code di bawah untuk login:"));
+            qrcode.generate(qr, { small: true });
+        }
+
+        if (connection === "close") {
+            botStatus.connected = false;
+            let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
+            console.log(chalk.yellow(`[ CONNECT ] Connection closed. Reason: ${reason}`));
+
+            if (reason === DisconnectReason.loggedOut) {
+                console.log(chalk.red("[ CONNECT ] Device Logged Out. Cleaning session and restarting..."));
+                await fs.remove("session").catch(() => { });
+                setTimeout(() => startBot(), 5000);
+            } else if (reason === DisconnectReason.restartRequired) {
+                console.log(chalk.blue("[ CONNECT ] Restart Required. Restarting..."));
+                startBot();
+            } else if (reason === DisconnectReason.timedOut) {
+                console.log(chalk.red("[ CONNECT ] Connection Timed Out. Reconnecting..."));
+                setTimeout(() => startBot(), 5000);
+            } else {
+                console.log(chalk.yellow(`[ CONNECT ] Reconnecting in 5s...`));
+                setTimeout(() => startBot(), 5000);
+            }
+        } else if (connection === "open") {
+            botStatus.connected = true;
+            botStatus.phone = decodeJid(sock.user?.id || '');
+
+            if (sock.user?.id && sock.user?.lid) {
+                lidHelper.registerMapping(sock.user.lid, sock.user.id);
+            }
+
+            console.log(chalk.green.bold("\n[ CONNECT ] Connected to WhatsApp"));
+            console.log(chalk.white(`[ TIME ] ${getWIBTime()} WIB\n`));
+
+            try {
+                const groups = await sock.groupFetchAllParticipating();
+                for (const g of Object.values(groups)) {
+                    lidHelper.extractFromGroupMetadata(g);
+                }
+            } catch { }
+
+            autoSyncPricelist();
+            setInterval(autoSyncPricelist, 12 * 60 * 60 * 1000);
+        }
+    });
+
+    sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => {
+        lidHelper.registerMapping(lid, jid);
+    });
+
+    sock.ev.on("contacts.upsert", (contacts) => {
+        if (!Array.isArray(contacts)) return;
+        for (const c of contacts) {
+            if (c.lid && (c.jid || c.id)) {
+                lidHelper.registerMapping(c.lid, c.jid || c.id);
+            }
+        }
+    });
+
+    sock.ev.on("contacts.update", (contacts) => {
+        if (!Array.isArray(contacts)) return;
+        for (const c of contacts) {
+            if (c.lid && c.id) {
+                lidHelper.registerMapping(c.lid, c.id);
+            }
+        }
+    });
+
+    sock.ev.on("groups.update", (groups) => {
+        if (!Array.isArray(groups)) return;
+        for (const g of groups) {
+            lidHelper.extractFromGroupMetadata(g);
+        }
+    });
+
+    if (!sock.authState.creds.registered) {
+        console.log(chalk.cyan.bold("\n[ LOGIN ] Pilih metode login:"));
+        console.log(chalk.white("1. QR Code"));
+        console.log(chalk.white("2. Pairing Code"));
+
+        loginChoice = await question(chalk.yellow("Masukkan pilihan (1/2): "));
+
+        if (loginChoice === "2") {
+            const phoneNumber = await question(chalk.yellow("Masukkan nomor WhatsApp (contoh: 628xxx): "));
+            if (!phoneNumber) {
+                console.log(chalk.red("[ ERROR ] Nomor tidak boleh kosong!"));
+                process.exit();
+            }
+            const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
+            console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
+            console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
+        } else if (loginChoice === "1") {
+            console.log(chalk.blue("\n[ INFO ] Menunggu QR Code muncul..."));
+        } else {
+            console.log(chalk.red("[ ERROR ] Pilihan tidak valid!"));
+            process.exit();
+        }
+    }
+    const startTime = Math.floor(Date.now() / 1000);
+
+    sock.ev.on("messages.upsert", async (chatUpdate) => {
+        try {
+            if (chatUpdate.type !== 'notify') return;
+            const mek = chatUpdate.messages[0];
+            if (!mek.message) return;
+
+            if (mek.messageTimestamp < startTime) return;
+
+            const messageId = mek.key.id;
+            if (messageCache.has(messageId)) return;
+            messageCache.add(messageId);
+
+            if (messageCache.size > 100) {
+                const firstItem = messageCache.values().next().value;
+                messageCache.delete(firstItem);
+            }
+
+            lidHelper.extractFromMessage(sock, mek);
+            await sock.readMessages([mek.key]);
+            const m = serialize(sock, mek);
+            require("./message")(sock, m);
+
+        } catch (err) {
+            console.log(chalk.red("[ ERROR ] " + err));
+        }
+    });
+
+    sock.ev.on("group-participants.update", async (update) => {
+        require('./lib/welcome')(sock, update);
+    });
+
+    setInterval(async () => {
+        const digiflazz = require('./lib/digiflazz');
+        const data = db.readDB();
+        const pendingTrx = Object.values(data.transactions).filter(t => t.status === 'pending');
+
+        if (pendingTrx.length === 0) return;
+
+        console.log(chalk.blue(`[ LOOP ] Checking ${pendingTrx.length} pending transactions...`));
+
+        for (const trx of pendingTrx) {
+            try {
+                const statusUpdate = await digiflazz.checkStatus(trx.sku, trx.target, trx.id);
+
+                if (statusUpdate.status === 'Sukses') {
+                    const gsheets = require('./lib/gsheets');
+                    const { createInvoice } = require('./lib/invoice');
+                    db.updateTransaction(trx.id, { status: 'success', sn: statusUpdate.sn });
+                    gsheets.sendToSheet({ ...trx, status: 'success', sn: statusUpdate.sn });
+
+                    let notifyJid = lidHelper.toJid(trx.chat || trx.user);
+                    let successMsg = `🎉 *TRANSAKSI BERHASIL* 🎉\n\n`;
+                    successMsg += `📝 *Detail Transaksi*\n`;
+                    successMsg += `▸ *Order ID :* ${trx.id}\n`;
+                    successMsg += `▸ *Produk   :* ${trx.product_name}\n`;
+                    successMsg += `▸ *Tujuan   :* ${trx.target}\n`;
+                    successMsg += `▸ *Status   :* ✅ SUKSES\n`;
+                    successMsg += `▸ *SN/Ref   :* ${statusUpdate.sn}\n\n`;
+                    successMsg += `💳 *Informasi Saldo*\n`;
+                    successMsg += `▸ *Harga    :* Rp${trx.price.toLocaleString()}\n`;
+                    successMsg += `▸ *Sisa Saldo:* Rp${trx.balance_after.toLocaleString()}\n\n`;
+                    successMsg += `_Terima kasih telah berbelanja!_ 🙏`;
+
+                    let isImageSent = false;
+                    const invPath = await createInvoice({ ...trx, sn: statusUpdate.sn, nickname: statusUpdate.customer_name });
+                    if (invPath) {
+                        try {
+                            const imgBuffer = fs.readFileSync(invPath);
+                            await sock.sendMessage(notifyJid, { image: imgBuffer, caption: successMsg });
+                            isImageSent = true;
+                        } catch (e) {
+                            console.error('[ ERROR ] Gagal mengirim gambar struk', e);
+                        }
+                    }
+                    
+                    if (!isImageSent) {
+                        await sock.sendMessage(notifyJid, { text: successMsg });
+                    }
+
+                    try {
+                        const targetUserJid = lidHelper.toJid(trx.user);
+                        let ownerSuccessMsg = `🟢 *TRANSAKSI BERHASIL (Laporan)* 🟢\n\n`;
+                        ownerSuccessMsg += `▸ *Order ID:* ${trx.id}\n`;
+                        ownerSuccessMsg += `▸ *User:* @${targetUserJid.split('@')[0]}\n`;
+                        ownerSuccessMsg += `▸ *Produk:* ${trx.product_name}\n`;
+                        ownerSuccessMsg += `▸ *Tujuan:* ${trx.target}\n`;
+                        ownerSuccessMsg += `▸ *SN:* ${statusUpdate.sn}\n\n`;
+                        ownerSuccessMsg += `💰 *Keuangan*\n`;
+                        ownerSuccessMsg += `▸ *Harga Modal:* Rp${trx.modal.toLocaleString()}\n`;
+                        ownerSuccessMsg += `▸ *Harga Jual:* Rp${trx.price.toLocaleString()}\n`;
+                        ownerSuccessMsg += `▸ *Profit:* Rp${(trx.price - trx.modal).toLocaleString()}\n`;
+                        
+                        for (let o of config.owner) {
+                            const ownerJid = lidHelper.toJid(o);
+                            await sock.sendMessage(ownerJid, { text: ownerSuccessMsg, mentions: [targetUserJid] });
+                        }
+                    } catch (e) { console.error('[ ERROR ] Gagal mengirim laporan sukses ke owner', e); }
+
+                } else if (statusUpdate.status === 'Gagal') {
+                    const user = db.getUser(trx.user);
+                    const refundedBalance = user.balance + trx.price;
+                    db.updateUser(trx.user, { balance: refundedBalance });
+                    db.updateTransaction(trx.id, { status: 'failed', note: statusUpdate.message });
+
+                    let notifyJid = lidHelper.toJid(trx.chat || trx.user);
+                    let failMsg = `⚠️ *TRANSAKSI GAGAL* ⚠️\n\n`;
+                    failMsg += `📝 *Detail Transaksi*\n`;
+                    failMsg += `▸ *Order ID :* ${trx.id}\n`;
+                    failMsg += `▸ *Produk   :* ${trx.product_name}\n`;
+                    failMsg += `▸ *Tujuan   :* ${trx.target}\n`;
+                    failMsg += `▸ *Status   :* ❌ GAGAL\n`;
+                    failMsg += `▸ *Alasan   :* ${statusUpdate.message}\n\n`;
+                    failMsg += `💳 *Refund Saldo*\n`;
+                    failMsg += `▸ *Saldo Kembali:* Rp${trx.price.toLocaleString()}\n`;
+                    failMsg += `▸ *Total Saldo  :* Rp${refundedBalance.toLocaleString()}\n\n`;
+                    failMsg += `_Saldo Anda telah dikembalikan secara otomatis._ 🔄`;
+
+                    sock.sendMessage(notifyJid, { text: failMsg });
+
+                    try {
+                        const targetUserJid = lidHelper.toJid(trx.user);
+                        let ownerFailMsg = `🔴 *TRANSAKSI GAGAL (Laporan)* 🔴\n\n`;
+                        ownerFailMsg += `▸ *Order ID:* ${trx.id}\n`;
+                        ownerFailMsg += `▸ *User:* @${targetUserJid.split('@')[0]}\n`;
+                        ownerFailMsg += `▸ *Produk:* ${trx.product_name}\n`;
+                        ownerFailMsg += `▸ *Tujuan:* ${trx.target}\n`;
+                        ownerFailMsg += `▸ *Alasan:* ${statusUpdate.message}\n\n`;
+                        ownerFailMsg += `_Sistem telah mengembalikan saldo sebesar Rp${trx.price.toLocaleString()} ke user._`;
+                        
+                        for (let o of config.owner) {
+                            const ownerJid = lidHelper.toJid(o);
+                            await sock.sendMessage(ownerJid, { text: ownerFailMsg, mentions: [targetUserJid] });
+                        }
+                    } catch (e) { console.error('[ ERROR ] Gagal mengirim laporan gagal ke owner', e); }
+                }
+            } catch (err) {
+                // Ignore transient network errors
+            }
+        }
+    }, 30000);
+
+    setInterval(async () => {
+        const moment = require('moment-timezone');
+        const sewa = db.getSewaPanel();
+        const now = moment().tz('Asia/Jakarta');
+
+        for (let item of sewa) {
+            const expired = moment.tz(item.expired, 'YYYY-MM-DD HH:mm:ss', 'Asia/Jakarta');
+            const userJid = lidHelper.toJid(item.nomor);
+
+            if (expired.diff(now, 'hours') <= 24 && expired.diff(now, 'hours') > 0 && !item.tagihanSent) {
+                const msg = `⚠️ *TAGIHAN PANEL*\n\nHallo ${item.nama},\nPanel Anda dengan spek *${item.spek}* akan segera kadaluarsa pada:\n*${item.expired}*\n\nSilakan lakukan perpanjangan agar panel tidak tersuspend otomatis.`;
+                sock.sendMessage(userJid, { text: msg });
+                db.updateSewaPanel(item.id, { tagihanSent: true });
+            }
+
+            if (now.isAfter(expired) && !item.suspended) {
+                const msg = `❌ *PANEL EXPIRED & SUSPENDED*\n\nHallo ${item.nama},\nPanel Anda telah kadaluarsa dan otomatis disuspend.\n\nSilakan hubungi admin untuk aktivasi kembali.`;
+                sock.sendMessage(userJid, { text: msg });
+
+                const ownerMsg = `🚨 *PANEL EXPIRED*\n\n• Nama: ${item.nama}\n• Nomor: ${item.nomor}\n• Spek: ${item.spek}\n• Status: Suspended`;
+                config.owner.forEach(o => sock.sendMessage(lidHelper.toJid(o), { text: ownerMsg }));
+
+                db.updateSewaPanel(item.id, { suspended: true });
+            }
+        }
+    }, 60000);
+
+    setInterval(async () => {
+        const { runBackup } = require('./lib/backup');
+        const settings = db.getSettings();
+        const now = new Date();
+        const currentDate = now.toLocaleDateString('id-ID');
+        const currentMonth = now.getMonth();
+
+        if (!settings.lastBackupDate) settings.lastBackupDate = '';
+        if (settings.lastBackupMonth === undefined) settings.lastBackupMonth = -1;
+
+        if (settings.lastBackupDate !== currentDate) {
+            await runBackup(sock, 'Daily');
+            db.updateSettings({ lastBackupDate: currentDate });
+        }
+
+        if (settings.lastBackupMonth !== currentMonth) {
+            await runBackup(sock, 'Monthly');
+            db.updateSettings({ lastBackupMonth: currentMonth });
+        }
+    }, 3600000);
+
+    return sock;
+}
+
+startBot();

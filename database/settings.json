@@ -1,0 +1,36 @@
+{
+  "gsheetUrl": "https://script.google.com/macros/s/AKfycby1HWkqIQvaAitym-Te1JfraU-i9KqLQHtIt-QKgXeueco2aFLerq64gvdZE227f7b6NA/exec",
+  "lastBackupDate": "23/5/2026",
+  "lastBackupMonth": 4,
+  "margins": {
+    "BRONZE": 0.5,
+    "GOLD": 0.02,
+    "OWNER": 0,
+    "SILVER": 0.05
+  },
+  "panelPrices": {
+    "10gb": 50000,
+    "1gb": 5000,
+    "2gb": 10000,
+    "3gb": 15000,
+    "4gb": 20000,
+    "5gb": 25000,
+    "6gb": 30000,
+    "7gb": 35000,
+    "8gb": 40000,
+    "9gb": 45000,
+    "unlimited": 100000
+  },
+  "publicMode": true,
+  "thumbnailUrl": "d:\\bot wa 2026\\BOT WA DIGIFLAZZ V.1\\database\\thumbnail.png",
+  "tokopay": {
+    "merchantId": "",
+    "secretKey": ""
+  },
+  "topupThumbnailUrl": "d:\\bot wa 2026\\BOT WA DIGIFLAZZ V.1\\database\\topup_thumbnail.png",
+  "upgradePrices": {
+    "GOLD": 100000,
+    "PLATINUM": 150000,
+    "SILVER": 50000
+  }
+}

@@ -1,0 +1,79 @@
+module.exports = {
+    name: "menu",
+    aliases: ["help", "?"],
+    run: async (sock, m) => {
+        const db = require('../lib/db');
+        const settings = db.getSettings();
+        const sender = m.sender;
+        const menuText = `╭──〔 𝗠𝗘𝗡𝗨 𝗨𝗧𝗔𝗠𝗔 〕──╮
+┃ • .menu / .help
+┃ • .daftar [nama]
+┃ • .topup (Produk Digiflazz)
+┃ • .list (produk manual)
+┃ • .buy [sku] [target]
+┃ • .saldo
+┃ • .profile
+┃ • .upgrade (Silver/Gold)
+┃ • .deposit (Isi Saldo Bot)
+┃ • .konfirmasi (Bukti TF)
+┃ • .payment
+┃ • .owner
+┃ • .getlid
+┃ • .tourl (Image to URL)
+╰────────────────╯
+
+╭──〔 𝗠𝗘𝗡𝗨 𝗢𝗪𝗡𝗘𝗥 〕──╮
+┃ • .digiflazz (saldo)
+┃ • .updateprice / .up
+┃ • .addsaldo [tag/reply]
+┃ • .setrole
+┃ • .setprofit
+┃ • .listmember
+┃ • .addbannermenu
+┃ • .addbannertopup
+┃ • .setgsheet
+┃ • .addrek / .delrek / .addqris
+┃ • .recap
+┃ • .checkip
+┃ • .backup
+┃ • .broadcast [pesan]
+╰────────────────╯
+
+╭──〔 𝗠𝗘𝗡𝗨 𝗚𝗥𝗨𝗣 〕──╮
+┃ • .addlist / .dellist
+┃ • .proses / .done
+┃ • .hidetag
+┃ • .linkgc
+┃ • .group [open/close]
+┃ • .antilink [on/off]
+┃ • .kick
+┃ • .promote
+┃ • .join
+╰────────────────╯`;
+
+        const fs = require('fs');
+
+        if (settings.thumbnailUrl) {
+            let isValidUrl = settings.thumbnailUrl.startsWith('http');
+            let isFileExists = !isValidUrl && fs.existsSync(settings.thumbnailUrl);
+
+            if (isValidUrl || isFileExists) {
+                try {
+                    let imagePayload = isValidUrl ? { url: settings.thumbnailUrl } : fs.readFileSync(settings.thumbnailUrl);
+                    await sock.sendMessage(m.chat, {
+                        image: imagePayload,
+                        caption: menuText
+                    }, { quoted: m });
+                    return; // Berhasil kirim image
+                } catch (err) {
+                    console.error('[ MENU ERROR ] Gagal mengirim thumbnail:', err.message);
+                }
+            } else {
+                console.error('[ MENU ERROR ] File thumbnail tidak ditemukan:', settings.thumbnailUrl);
+            }
+        }
+
+        // Fallback: Kirim text tanpa gambar
+        await sock.reply(m.chat, menuText, m);
+    }
+};
