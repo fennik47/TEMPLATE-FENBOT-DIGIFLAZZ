@@ -99,7 +99,8 @@ module.exports = async (sock, m) => {
                 const user = await db.getUserAsync(userId);
                 if (user.balance < data.price) return sock.reply(chat, "❌ Saldo tidak cukup.", m);
 
-                const refId = `TRX${Date.now()}${Math.floor(Math.random() * 1000)}`;
+                const crypto = require('crypto');
+                const refId = `TRX${Date.now()}${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
                 try {
                     // 1. Reserve balance via FENBOT CLOUD ACID row locking
                     await db.reserveBalance(userId, data.price);
@@ -135,7 +136,7 @@ module.exports = async (sock, m) => {
         }
 
         if (!isExecuted && body && body.toLowerCase() === "halo") {
-            return sock.reply(chat, "Halo juga 👋", m);
+            return sock.reply(chat, "Halo juga!", m);
         }
 
     } catch (err) {

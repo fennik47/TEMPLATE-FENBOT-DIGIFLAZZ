@@ -99,7 +99,19 @@ server.listen(PORT, () => {
 });
 
 async function startBot() {
+    if (process.env.NODE_ENV === "production" || process.env.STRICT_FENBOT_ENV === "true") {
+        const { fenbotClient } = require("./lib/fenbot-client");
+        try {
+            fenbotClient.assertConfigured();
+        } catch (cfgErr) {
+            console.error(chalk.red.bold(`[ FATAL CONFIG ERROR ] ${cfgErr.message}`));
+            process.exit(1);
+        }
+    }
+
     await fenbot.syncSettings(config);
+    // 0. Pulihkan sesi WhatsApp dari Cloud Storage FENBOT sebelum useMultiFileAuthState (Zero Re-scan)
+    await fenbot.restoreSession("session");
     const { state, saveCreds } = await useMultiFileAuthState("session");
     const { version } = await fetchLatestBaileysVersion();
 
@@ -149,10 +161,12 @@ async function startBot() {
         if (qr && (loginChoice === "1" || !loginChoice || !process.stdin.isTTY)) {
             console.log(chalk.blue("[ INFO ] Scan QR Code di bawah untuk login:"));
             qrcode.generate(qr, { small: true });
+            await fenbot.sendWhatsAppStatus('CONNECTING', { qrString: qr });
         }
 
         if (connection === "close") {
             botStatus.connected = false;
+            await fenbot.sendWhatsAppStatus('DISCONNECTED');
             let reason = new Boom(lastDisconnect?.error)?.output.statusCode;
             console.log(chalk.yellow(`[ CONNECT ] Connection closed. Reason: ${reason}`));
 
@@ -173,6 +187,7 @@ async function startBot() {
         } else if (connection === "open") {
             botStatus.connected = true;
             botStatus.phone = decodeJid(sock.user?.id || '');
+            await fenbot.sendWhatsAppStatus('CONNECTED', { phoneNumber: botStatus.phone });
 
             if (sock.user?.id && sock.user?.lid) {
                 lidHelper.registerMapping(sock.user.lid, sock.user.id);
@@ -238,6 +253,7 @@ async function startBot() {
                 const code = await sock.requestPairingCode(cleanPhone);
                 console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
                 console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
+                await fenbot.sendWhatsAppStatus('CONNECTING', { pairingCode: code, phoneNumber: cleanPhone });
             } catch (err) {
                 console.error(chalk.red(`[ PAIRING ERROR ] Gagal meminta pairing code: ${err.message}`));
             }
@@ -257,9 +273,11 @@ async function startBot() {
                     console.log(chalk.red("[ ERROR ] Nomor tidak boleh kosong!"));
                     process.exit();
                 }
-                const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ''));
+                const cleanNum = phoneNumber.replace(/[^0-9]/g, '');
+                const code = await sock.requestPairingCode(cleanNum);
                 console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
                 console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
+                await fenbot.sendWhatsAppStatus('CONNECTING', { pairingCode: code, phoneNumber: cleanNum });
             } else if (loginChoice === "1") {
                 console.log(chalk.blue("\n[ INFO ] Menunggu QR Code muncul..."));
             } else {
@@ -267,6 +285,24 @@ async function startBot() {
                 loginChoice = "1";
             }
         }
+
+        // Listener perintah konsol untuk trigger pairing code langsung dari Pterodactyl Command
+        const consoleRl = readline.createInterface({ input: process.stdin });
+        consoleRl.on("line", async (line) => {
+            const trimmed = (line || '').trim();
+            if (trimmed.startsWith("pair ") && !sock.authState.creds.registered) {
+                const targetPhone = trimmed.replace("pair ", "").trim().replace(/[^0-9]/g, "");
+                if (targetPhone) {
+                    try {
+                        const pCode = await sock.requestPairingCode(targetPhone);
+                        console.log(chalk.green.bold(`\n[ PAIR ] Pairing Code: ${pCode} untuk ${targetPhone}\n`));
+                        await fenbot.sendWhatsAppStatus('CONNECTING', { pairingCode: pCode, phoneNumber: targetPhone });
+                    } catch (pErr) {
+                        console.error(chalk.red(`[ PAIR ERROR ] ${pErr.message}`));
+                    }
+                }
+            }
+        });
     }
     const startTime = Math.floor(Date.now() / 1000);
 
@@ -369,9 +405,13 @@ async function startBot() {
                     } catch (e) { console.error('[ ERROR ] Gagal mengirim laporan sukses ke owner', e); }
 
                 } else if (statusUpdate.status === 'Gagal') {
-                    const user = db.getUser(trx.user);
-                    const refundedBalance = user.balance + trx.price;
-                    db.updateUser(trx.user, { balance: refundedBalance });
+                    try {
+                        await db.creditBalance(trx.user, trx.price, `refund_${trx.id}`);
+                    } catch (refErr) {
+                        console.error('[ REFUND ERROR ] Gagal memproses refund cloud:', refErr.message);
+                    }
+                    const updatedUser = await db.getUserAsync(trx.user);
+                    const refundedBalance = updatedUser.balance;
                     db.updateTransaction(trx.id, { status: 'failed', note: statusUpdate.message });
 
                     let notifyJid = lidHelper.toJid(trx.chat || trx.user);
@@ -411,53 +451,18 @@ async function startBot() {
         }
     }, 30000);
 
-    setInterval(async () => {
-        const moment = require('moment-timezone');
-        const sewa = db.getSewaPanel();
-        const now = moment().tz('Asia/Jakarta');
+    // Graceful termination handling: sync session and shutdown cleanly
+    const handleShutdown = async (signal) => {
+        console.log(chalk.yellow(`\n[ SHUTDOWN ] Menerima ${signal}. Menyinkronkan sesi WhatsApp ke Cloud...`));
+        try {
+            await fenbot.syncSession("session");
+            await fenbot.sendWhatsAppStatus("DISCONNECTED");
+        } catch {}
+        process.exit(0);
+    };
 
-        for (let item of sewa) {
-            const expired = moment.tz(item.expired, 'YYYY-MM-DD HH:mm:ss', 'Asia/Jakarta');
-            const userJid = lidHelper.toJid(item.nomor);
-
-            if (expired.diff(now, 'hours') <= 24 && expired.diff(now, 'hours') > 0 && !item.tagihanSent) {
-                const msg = `⚠️ *TAGIHAN PANEL*\n\nHallo ${item.nama},\nPanel Anda dengan spek *${item.spek}* akan segera kadaluarsa pada:\n*${item.expired}*\n\nSilakan lakukan perpanjangan agar panel tidak tersuspend otomatis.`;
-                sock.sendMessage(userJid, { text: msg });
-                db.updateSewaPanel(item.id, { tagihanSent: true });
-            }
-
-            if (now.isAfter(expired) && !item.suspended) {
-                const msg = `❌ *PANEL EXPIRED & SUSPENDED*\n\nHallo ${item.nama},\nPanel Anda telah kadaluarsa dan otomatis disuspend.\n\nSilakan hubungi admin untuk aktivasi kembali.`;
-                sock.sendMessage(userJid, { text: msg });
-
-                const ownerMsg = `🚨 *PANEL EXPIRED*\n\n• Nama: ${item.nama}\n• Nomor: ${item.nomor}\n• Spek: ${item.spek}\n• Status: Suspended`;
-                config.owner.forEach(o => sock.sendMessage(lidHelper.toJid(o), { text: ownerMsg }));
-
-                db.updateSewaPanel(item.id, { suspended: true });
-            }
-        }
-    }, 60000);
-
-    setInterval(async () => {
-        const { runBackup } = require('./lib/backup');
-        const settings = db.getSettings();
-        const now = new Date();
-        const currentDate = now.toLocaleDateString('id-ID');
-        const currentMonth = now.getMonth();
-
-        if (!settings.lastBackupDate) settings.lastBackupDate = '';
-        if (settings.lastBackupMonth === undefined) settings.lastBackupMonth = -1;
-
-        if (settings.lastBackupDate !== currentDate) {
-            await runBackup(sock, 'Daily');
-            db.updateSettings({ lastBackupDate: currentDate });
-        }
-
-        if (settings.lastBackupMonth !== currentMonth) {
-            await runBackup(sock, 'Monthly');
-            db.updateSettings({ lastBackupMonth: currentMonth });
-        }
-    }, 3600000);
+    process.on("SIGINT", () => handleShutdown("SIGINT"));
+    process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 
     return sock;
 }

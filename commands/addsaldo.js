@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const db = require('../lib/db');
 const lidHelper = require('../lib/lidHelper');
 
@@ -21,18 +22,22 @@ module.exports = {
             return sock.reply(m.chat, `❌ *Format Salah!*\n\n*Penggunaan:* .addsaldo [Tag/Reply User] [Jumlah]\n*Contoh:* .addsaldo @62857xxx 50000`, m);
         }
 
-        const user = db.getUser(target);
-        const before = user.balance;
-        const after = before + amount;
-        db.updateUser(target, { balance: after });
-
-        await sock.reply(m.chat, `✅ Berhasil menambah saldo @${target.split('@')[0]} sebesar Rp${amount.toLocaleString()}\nTotal Saldo: Rp${after.toLocaleString()}`, m, { mentions: [target] });
-
-        const notifMsg = `📢 *Saldo Anda Telah Ditambah!*\n\n• Saldo Sebelumnya: Rp${before.toLocaleString()}\n• Penambahan: +Rp${amount.toLocaleString()}\n• Saldo Sekarang: Rp${after.toLocaleString()}`;
         try {
-            await sock.sendMessage(target, { text: notifMsg });
-        } catch (e) {
-            console.error('[ ADD SALDO NOTIF ] Gagal mengirim pesan ke user:', e);
+            const idempotencyKey = `add_${target.replace(/\D/g, '')}_${amount}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+            const result = await db.creditBalance(target, amount, idempotencyKey);
+            const user = await db.getUserAsync(target);
+
+            await sock.reply(m.chat, `✅ Berhasil menambah saldo @${target.split('@')[0]} sebesar Rp${amount.toLocaleString()}\nTotal Saldo: Rp${user.balance.toLocaleString()}`, m, { mentions: [target] });
+
+            const notifMsg = `📢 *Saldo Anda Telah Ditambah!*\n\n• Penambahan: +Rp${amount.toLocaleString()}\n• Saldo Sekarang: Rp${user.balance.toLocaleString()}`;
+            try {
+                await sock.sendMessage(target, { text: notifMsg });
+            } catch (e) {
+                console.error('[ ADD SALDO NOTIF ] Gagal mengirim pesan ke user:', e.message);
+            }
+        } catch (err) {
+            console.error('[ ADD SALDO ERROR ]', err.message);
+            return sock.reply(m.chat, `❌ Gagal menambah saldo: ${err.message}`, m);
         }
     }
 };

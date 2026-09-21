@@ -9,15 +9,17 @@ const parseList = (str, defaultList) => {
 };
 
 module.exports = {
+    instanceId: process.env.INSTANCE_ID || "",
+    instanceAuthToken: process.env.INSTANCE_AUTH_TOKEN || "",
+    controlPlaneUrl: process.env.FENBOT_API_URL || process.env.CONTROL_PLANE_URL || "",
     owner: parseList(process.env.OWNER_NUMBER, ["628123456789"]),
     ownerName: process.env.OWNER_NAME || "Fennik",
     botName: process.env.BOT_NAME || "Fennik Bot",
     storeName: process.env.STORE_NAME || "Fennik Store",
     prefix: parseList(process.env.PREFIX, [".", "!", "/"]),
     digiflazz: {
-        username: process.env.DIGIFLAZZ_USERNAME || "YOUR_DIGIFLAZZ_USERNAME",
-        apiKey: process.env.DIGIFLAZZ_API_KEY || "YOUR_DIGIFLAZZ_API_KEY"
+        username: process.env.DIGIFLAZZ_USERNAME || "",
+        apiKey: process.env.DIGIFLAZZ_API_KEY || ""
     },
-    firebaseUrl: process.env.FIREBASE_URL || "",
     port: process.env.PORT || 3000
 };
