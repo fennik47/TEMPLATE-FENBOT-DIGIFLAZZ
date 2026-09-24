@@ -7,15 +7,16 @@ module.exports = {
         const sender = m.sender;
         const menuText = `╭──〔 𝗠𝗘𝗡𝗨 𝗨𝗧𝗔𝗠𝗔 〕──╮
 ┃ • .menu / .help
-┃ • .daftar [nama]
 ┃ • .topup (Produk Digiflazz)
 ┃ • .list (produk manual)
-┃ • .buy [sku] [target]
+┃ • .buy [sku] [target] (Saldo Bot)
+┃ • .buyqris [sku] [target] (QRIS Otomatis)
 ┃ • .saldo
 ┃ • .profile
 ┃ • .upgrade (Silver/Gold)
-┃ • .deposit (Isi Saldo Bot)
-┃ • .konfirmasi (Bukti TF)
+┃ • .deposit [nominal] (QRIS Otomatis)
+┃ • .cekstatus [ref_no]
+┃ • .konfirmasi (Bukti TF Manual)
 ┃ • .payment
 ┃ • .owner
 ┃ • .getlid
@@ -34,7 +35,6 @@ module.exports = {
 ┃ • .addrek / .delrek / .addqris
 ┃ • .recap
 ┃ • .checkip
-┃ • .backup
 ┃ • .broadcast [pesan]
 ╰────────────────╯
 

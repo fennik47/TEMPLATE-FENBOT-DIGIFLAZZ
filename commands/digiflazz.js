@@ -5,7 +5,7 @@ module.exports = {
     name: "digiflazz",
     aliases: ["df", "cekflazz", "depoflazz"],
     run: async (sock, m, { args, isOwner }) => {
-        if (!isOwner) return;
+        if (!isOwner) return sock.reply(m.chat, '❌ Khusus Owner!', m);
 
         if (args.length === 0) {
             return sock.reply(m.chat, `───〔 *MANAJEMEN DIGIFLAZZ* 〕───\n\n` +

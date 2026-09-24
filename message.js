@@ -17,9 +17,17 @@ module.exports = async (sock, m) => {
         if (!sender) return;
 
         const senderDigits = sender.replace(/[^0-9]/g, '');
+        const normalizePhone = (num) => {
+            let clean = (num || '').toString().replace(/[^0-9]/g, '');
+            if (clean.startsWith('0')) clean = '62' + clean.slice(1);
+            if (clean.startsWith('620')) clean = '62' + clean.slice(3);
+            return clean;
+        };
+
+        const senderNormalized = normalizePhone(senderDigits);
         const isOwner = config.owner.some(v => {
-            const vClean = v.toString().replace(/[^0-9]/g, '');
-            return (vClean.length >= 8 && senderDigits.endsWith(vClean.slice(-8))) || lidHelper.toJid(v) === sender;
+            const vNormalized = normalizePhone(v);
+            return (vNormalized.length >= 8 && vNormalized === senderNormalized) || lidHelper.toJid(v) === sender;
         }) || fromMe;
 
         const prefix = (config.prefix || []).find((p) => p !== "" && body && body.startsWith(p)) || "";
@@ -59,13 +67,23 @@ module.exports = async (sock, m) => {
         }
 
         const userId = sender;
-        const isReg = db.isRegistered(userId);
+        const user = db.getUser(userId);
+        const phoneDigits = sender.replace(/[^0-9]/g, '') || sender.split('@')[0];
+
+        // Silent Auto-Registration / Auto-Provisioning instan
+        if (!user.registered) {
+            db.updateUser(userId, {
+                name: m.pushName || 'Pengguna',
+                nomor: phoneDigits,
+                registered: true,
+                registeredAt: new Date().toISOString()
+            });
+        } else if (m.pushName && (!user.name || user.name === 'Pengguna')) {
+            db.updateUser(userId, { name: m.pushName });
+        }
+
         const commandFiles = fs.readdirSync(path.join(__dirname, "commands")).filter(file => file.endsWith(".js"));
         let isExecuted = false;
-
-        if (isCmd && !isReg && command !== 'daftar' && !isOwner) {
-            return sock.reply(chat, `🚫 *AKSES DITOLAK*\n\nMaaf, Anda harus terdaftar untuk menggunakan fitur bot ini.\n\nSilakan ketik *.daftar NamaAnda* untuk mendaftar.`, m);
-        }
 
         for (const file of commandFiles) {
             const cmd = require(`./commands/${file}`);

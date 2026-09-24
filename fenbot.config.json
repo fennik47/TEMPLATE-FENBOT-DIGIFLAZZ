@@ -96,6 +96,14 @@
       "type": "string",
       "required": false,
       "placeholder": "Contoh: Kherul Anam"
+    },
+    {
+      "key": "mustikapay_api_key",
+      "label": "MustikaPay API Key (QRIS Otomatis)",
+      "type": "password",
+      "required": false,
+      "placeholder": "MP-USER-XXXXX",
+      "description": "API Key merchant dari https://mustikapayment.com untuk fitur deposit QRIS otomatis."
     }
   ]
 }

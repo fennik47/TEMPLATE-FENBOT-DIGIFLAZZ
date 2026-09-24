@@ -34,11 +34,224 @@ const question = (text) => {
 };
 
 const messageCache = new Set();
+let globalSock = null;
 let botStatus = {
     connected: false,
     startedAt: new Date().toISOString(),
     phone: ''
 };
+
+/**
+ * Pemrosesan deposit lunas dengan proteksi mutex & idempotency
+ */
+async function processPaidDeposit(deposit, payload = {}, source = 'webhook') {
+    if (!deposit || deposit.status === 'paid' || deposit.isProcessing) return false;
+    deposit.isProcessing = true;
+
+    const refNo = deposit.ref_no || deposit.id;
+    const amount = Number(deposit.amount);
+    const userJid = deposit.user;
+    const idempotencyKey = `dep_credit_${deposit.id || refNo}`;
+
+    console.log(chalk.green(`[ MUSTIKAPAY ] Memproses pembayaran lunas untuk Ref: ${refNo}, User: ${userJid}, Rp${amount.toLocaleString()} via ${source}`));
+
+    try {
+        await db.creditBalance(userJid, amount, idempotencyKey);
+    } catch (creditErr) {
+        console.error('[ MUSTIKAPAY ] Gagal creditBalance ke FENBOT CLOUD:', creditErr.message);
+    }
+
+    db.updateDeposit(refNo, {
+        status: 'paid',
+        paidAt: new Date().toISOString(),
+        isProcessing: false,
+        settledVia: source,
+        gatewayData: payload
+    });
+
+    const updatedUser = await db.getUserAsync(userJid);
+    const finalBalance = updatedUser ? updatedUser.balance : 0;
+
+    if (globalSock) {
+        try {
+            const notifyJid = lidHelper.toJid(deposit.chat || userJid);
+            let msg = `🎉 *DEPOSIT QRIS BERHASIL* 🎉\n\n`;
+            msg += `📝 *Detail Pembayaran*\n`;
+            msg += `▸ *Ref ID     :* ${refNo}\n`;
+            msg += `▸ *Nominal    :* Rp${amount.toLocaleString()}\n`;
+            msg += `▸ *Status     :* ✅ LUNAS / PAID\n`;
+            msg += `▸ *Total Saldo:* Rp${finalBalance.toLocaleString()}\n\n`;
+            msg += `_Saldo telah berhasil ditambahkan ke akun Anda. Selamat berbelanja!_ 🚀`;
+
+            await globalSock.sendMessage(notifyJid, { text: msg });
+        } catch (msgErr) {
+            console.error('[ MUSTIKAPAY ] Gagal kirim notifikasi user:', msgErr.message);
+        }
+
+        try {
+            const targetUserJid = lidHelper.toJid(userJid);
+            let ownerMsg = `🟢 *DEPOSIT QRIS MASUK (Laporan)* 🟢\n\n`;
+            ownerMsg += `▸ *Ref ID :* ${refNo}\n`;
+            ownerMsg += `▸ *User   :* @${targetUserJid.split('@')[0]}\n`;
+            ownerMsg += `▸ *Nominal:* Rp${amount.toLocaleString()}\n`;
+            ownerMsg += `▸ *Metode :* MustikaPay QRIS (${source})\n`;
+
+            for (let o of config.owner) {
+                const ownerJid = lidHelper.toJid(o);
+                await globalSock.sendMessage(ownerJid, { text: ownerMsg, mentions: [targetUserJid] });
+            }
+        } catch (ownerErr) {
+            console.error('[ MUSTIKAPAY ] Gagal kirim laporan owner:', ownerErr.message);
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Pemrosesan pembelian produk Digiflazz langsung bayar via QRIS (Anti-Race Condition & Concurrency Safe)
+ * Siklus Status: pending -> paid -> process -> sukses / failed (auto-refund ke saldo bot cloud)
+ */
+async function processPaidQrisOrder(order, payload = {}, source = 'webhook') {
+    if (!order || order.status !== 'pending' || order.isProcessing) return false;
+    order.isProcessing = true;
+
+    const refNo = order.ref_no || order.id;
+    const orderId = order.id;
+    const amount = Number(order.price);
+    const userJid = order.user;
+    const idempotencyKey = `qris_order_credit_${orderId}`;
+
+    console.log(chalk.green(`[ MUSTIKAPAY QRIS BUY ] Pembayaran terverifikasi untuk Order: ${orderId}, Ref: ${refNo}, User: ${userJid}, Produk: ${order.product_name} via ${source}`));
+
+    // 1. Audit penambahan dana masuk (QRIS) ke PostgreSQL FENBOT CLOUD
+    try {
+        await db.creditBalance(userJid, amount, idempotencyKey);
+    } catch (creditErr) {
+        console.error('[ MUSTIKAPAY QRIS BUY ] Gagal kredit saldo cloud:', creditErr.message);
+    }
+
+    // 2. Update status order menjadi 'process'
+    db.updateQrisOrder(refNo, {
+        status: 'process',
+        paidAt: new Date().toISOString(),
+        settledVia: source,
+        gatewayData: payload
+    });
+
+    const notifyJid = lidHelper.toJid(order.chat || userJid);
+
+    if (globalSock) {
+        try {
+            let procMsg = `🎉 *PEMBAYARAN QRIS DITERIMA!* 🎉\n\n`;
+            procMsg += `• Order ID : *${orderId}*\n`;
+            procMsg += `• Produk   : *${order.product_name}*\n`;
+            procMsg += `• Tujuan   : *${order.target}*\n`;
+            procMsg += `• Status   : ⏳ *PROCESS (Sedang Dikirim)*\n\n`;
+            procMsg += `_Sistem sedang memproses pengisian ke nomor tujuan Anda. Mohon tunggu sebentar..._ ⚡`;
+            await globalSock.sendMessage(notifyJid, { text: procMsg });
+        } catch {}
+    }
+
+    // 3. Eksekusi pengisian ke Digiflazz
+    const digiflazz = require('./lib/digiflazz');
+    try {
+        // Kunci saldo via ACID row reservation
+        await db.reserveBalance(userJid, amount);
+
+        const result = await digiflazz.topup(order.sku, order.target, orderId);
+
+        if (result.status === 'Gagal') {
+            // Provider gagal -> Lepaskan reservasi agar uang tetap aman di saldo bot user di Cloud (Instant Auto-Refund)
+            await db.releaseReservation(userJid, amount);
+            db.updateQrisOrder(refNo, {
+                status: 'failed',
+                note: result.message,
+                isProcessing: false
+            });
+
+            const updatedUser = await db.getUserAsync(userJid);
+            if (globalSock) {
+                let failMsg = `⚠️ *PENGISIAN PRODUK GAGAL (AUTO-REFUND)* ⚠️\n\n`;
+                failMsg += `• Order ID : *${orderId}*\n`;
+                failMsg += `• Produk   : *${order.product_name}*\n`;
+                failMsg += `• Tujuan   : *${order.target}*\n`;
+                failMsg += `• Alasan   : ${result.message}\n\n`;
+                failMsg += `💳 *Dana Masuk ke Saldo Bot Anda*\n`;
+                failMsg += `Karena Anda telah membayar via QRIS, dana sebesar *Rp${amount.toLocaleString()}* telah otomatis dimasukkan ke *Saldo Bot* Anda di Cloud.\n`;
+                failMsg += `▸ *Saldo Anda Sekarang:* Rp${(updatedUser ? updatedUser.balance : 0).toLocaleString()}\n\n`;
+                failMsg += `_Anda dapat menggunakan saldo ini kapan saja via *.buy* atau menariknya._ 🔄`;
+                await globalSock.sendMessage(notifyJid, { text: failMsg });
+            }
+            return true;
+        }
+
+        // Provider respon 'Pending' atau 'Sukses' -> Commit debit di Cloud
+        await db.commitDebit(userJid, amount);
+        const updatedUser = await db.getUserAsync(userJid);
+
+        db.updateQrisOrder(refNo, {
+            status: result.status.toLowerCase(),
+            sn: result.sn || '',
+            isProcessing: false
+        });
+
+        // Daftarkan ke transactions DB agar loop pending Digiflazz otomatis mengawasi hingga sukses/invoice
+        db.addTransaction(orderId, {
+            user: userJid,
+            sku: order.sku,
+            product_name: order.product_name,
+            target: order.target,
+            price: amount,
+            modal: order.modal,
+            balance_before: updatedUser ? updatedUser.balance + amount : amount,
+            balance_after: updatedUser ? updatedUser.balance : 0,
+            status: result.status.toLowerCase(),
+            sn: result.sn || '',
+            note: result.message,
+            chat: order.chat
+        });
+
+        if (result.status === 'Sukses') {
+            const gsheets = require('./lib/gsheets');
+            const { createInvoice } = require('./lib/invoice');
+            gsheets.sendToSheet({ ...order, status: 'success', sn: result.sn });
+
+            let successMsg = `🎉 *TRANSAKSI BERHASIL (QRIS OTOMATIS)* 🎉\n\n`;
+            successMsg += `📝 *Detail Pembelian*\n`;
+            successMsg += `▸ *Order ID :* ${orderId}\n`;
+            successMsg += `▸ *Produk   :* ${order.product_name}\n`;
+            successMsg += `▸ *Tujuan   :* ${order.target}\n`;
+            successMsg += `▸ *Status   :* ✅ SUKSES\n`;
+            successMsg += `▸ *SN/Ref   :* ${result.sn || '-'}\n\n`;
+            successMsg += `_Terima kasih telah berbelanja!_ 🙏`;
+
+            if (globalSock) {
+                let isImageSent = false;
+                try {
+                    const invPath = await createInvoice({ ...order, sn: result.sn, nickname: result.customer_name });
+                    if (invPath && fs.existsSync(invPath)) {
+                        const imgBuffer = fs.readFileSync(invPath);
+                        await globalSock.sendMessage(notifyJid, { image: imgBuffer, caption: successMsg });
+                        isImageSent = true;
+                    }
+                } catch {}
+                if (!isImageSent) {
+                    await globalSock.sendMessage(notifyJid, { text: successMsg });
+                }
+            }
+        }
+    } catch (err) {
+        await db.releaseReservation(userJid, amount).catch(() => {});
+        db.updateQrisOrder(refNo, {
+            status: 'failed',
+            note: err.message || 'Kesalahan sistem provider',
+            isProcessing: false
+        });
+    }
+
+    return true;
+}
 
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
@@ -50,8 +263,77 @@ const server = http.createServer((req, res) => {
             bot: botStatus.connected ? 'connected' : 'connecting',
             time: getWIBTime(),
             products: (dbData.products || []).length,
-            users: Object.keys(dbData.users || {}).length
+            users: Object.keys(dbData.users || {}).length,
+            deposits: Object.keys(dbData.deposits || {}).length,
+            qris_orders: Object.keys(dbData.qris_orders || {}).length
         }));
+    }
+
+    // Webhook Endpoint MustikaPay
+    if (req.url === '/api/mustikapay/callback' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            const mustikapay = require('./lib/mustikapay');
+            const signature = req.headers['x-signature'] || req.headers['signature'] || '';
+            let parsed = {};
+            try {
+                parsed = JSON.parse(body);
+            } catch {
+                try {
+                    const qs = require('querystring');
+                    parsed = qs.parse(body);
+                } catch {}
+            }
+
+            console.log(chalk.blue(`[ MUSTIKAPAY WEBHOOK ] Diterima callback:`), JSON.stringify(parsed));
+
+            if (signature && mustikapay.apiKey) {
+                const isValid = mustikapay.verifyCallback(body, signature);
+                if (!isValid) {
+                    console.warn(chalk.red('[ MUSTIKAPAY WEBHOOK ] Signature tidak valid!'));
+                    res.writeHead(401, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
+                }
+            }
+
+            const refNo = parsed.ref_no || parsed.reference || parsed.order_id || parsed.id;
+            const status = (parsed.status || '').toLowerCase();
+
+            if (!refNo) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'Missing ref_no' }));
+            }
+
+            // 1. Cek apakah ini transaksi pembelian produk langsung (qris_orders)
+            const qrisOrder = db.getQrisOrder(refNo);
+            if (qrisOrder) {
+                if (status === 'success' || status === 'paid' || status === 'settlement') {
+                    await processPaidQrisOrder(qrisOrder, parsed, 'webhook');
+                } else if (status === 'expired' || status === 'failed') {
+                    db.updateQrisOrder(refNo, { status });
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'ok', type: 'qris_order' }));
+            }
+
+            // 2. Cek apakah ini transaksi deposit saldo biasa (deposits)
+            const deposit = db.getDeposit(refNo);
+            if (deposit) {
+                if (status === 'success' || status === 'paid' || status === 'settlement') {
+                    await processPaidDeposit(deposit, parsed, 'webhook');
+                } else if (status === 'expired' || status === 'failed') {
+                    db.updateDeposit(refNo, { status });
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'ok', type: 'deposit' }));
+            }
+
+            console.warn(chalk.yellow(`[ MUSTIKAPAY WEBHOOK ] Ref tidak ditemukan: ${refNo}`));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'ok', message: 'Not found locally' }));
+        });
+        return;
     }
 
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -135,6 +417,8 @@ async function startBot() {
             return { conversation: "" };
         },
     });
+
+    globalSock = sock;
 
     const autoSyncPricelist = async () => {
         try {
@@ -450,6 +734,89 @@ async function startBot() {
             }
         }
     }, 30000);
+
+    // Background Worker: Polling status deposit MustikaPay (QRIS Otomatis) setiap 15 detik
+    setInterval(async () => {
+        const mustikapay = require('./lib/mustikapay');
+        if (!mustikapay.apiKey) return;
+
+        // A. Pengecekan deposit saldo biasa
+        const pendingDeposits = db.getPendingDeposits();
+        for (const dep of pendingDeposits) {
+            const refNo = dep.ref_no || dep.id;
+
+            // 1. Cek batas kadaluarsa tagihan (15 menit)
+            if (dep.expiresAt && Date.now() > new Date(dep.expiresAt).getTime()) {
+                db.updateDeposit(refNo, { status: 'expired' });
+                try {
+                    const notifyJid = lidHelper.toJid(dep.chat || dep.user);
+                    let expMsg = `⏰ *TAGIHAN QRIS KADALUARSA (EXPIRED)* ⏰\n\n`;
+                    expMsg += `▸ *Ref ID :* ${refNo}\n`;
+                    expMsg += `▸ *Nominal:* Rp${Number(dep.amount).toLocaleString()}\n`;
+                    expMsg += `▸ *Status :* ❌ KADALUARSA\n\n`;
+                    expMsg += `_Batas waktu pembayaran 15 menit telah habis. Jika Anda masih ingin menambah saldo, silakan buat tagihan baru via *.deposit [nominal]*._`;
+                    if (sock) await sock.sendMessage(notifyJid, { text: expMsg });
+                } catch {}
+                continue;
+            }
+
+            // 2. Proteksi konkurensi: lewati jika sedang diproses oleh webhook atau worker lain
+            if (dep.isProcessing || dep.status !== 'pending') continue;
+
+            // 3. Cek status ke API MustikaPay
+            try {
+                const statusRes = await mustikapay.checkQrisStatus(refNo);
+                const s = (statusRes.status || '').toLowerCase();
+
+                if (s === 'success' || s === 'paid' || s === 'settlement') {
+                    await processPaidDeposit(dep, statusRes, 'polling');
+                } else if (s === 'expired' || s === 'failed') {
+                    db.updateDeposit(refNo, { status: s });
+                }
+            } catch (pollErr) {
+                // Abaikan error sementara koneksi
+            }
+        }
+
+        // B. Pengecekan pembelian produk Digiflazz langsung bayar via QRIS
+        const pendingQrisOrders = db.getPendingQrisOrders();
+        for (const ord of pendingQrisOrders) {
+            const refNo = ord.ref_no || ord.id;
+
+            // 1. Cek batas kadaluarsa tagihan (15 menit)
+            if (ord.expiresAt && Date.now() > new Date(ord.expiresAt).getTime()) {
+                db.updateQrisOrder(refNo, { status: 'expired' });
+                try {
+                    const notifyJid = lidHelper.toJid(ord.chat || ord.user);
+                    let expMsg = `⏰ *TAGIHAN QRIS PEMBELIAN KADALUARSA (EXPIRED)* ⏰\n\n`;
+                    expMsg += `▸ *Order ID :* ${ord.id}\n`;
+                    expMsg += `▸ *Produk   :* ${ord.product_name}\n`;
+                    expMsg += `▸ *Tujuan   :* ${ord.target}\n`;
+                    expMsg += `▸ *Status   :* ❌ KADALUARSA\n\n`;
+                    expMsg += `_Batas waktu pembayaran 15 menit telah habis. Silakan buat pesanan baru via *.buyqris*._`;
+                    if (sock) await sock.sendMessage(notifyJid, { text: expMsg });
+                } catch {}
+                continue;
+            }
+
+            // 2. Proteksi konkurensi: lewati jika sedang diproses
+            if (ord.isProcessing || ord.status !== 'pending') continue;
+
+            // 3. Cek status ke API MustikaPay
+            try {
+                const statusRes = await mustikapay.checkQrisStatus(refNo);
+                const s = (statusRes.status || '').toLowerCase();
+
+                if (s === 'success' || s === 'paid' || s === 'settlement') {
+                    await processPaidQrisOrder(ord, statusRes, 'polling');
+                } else if (s === 'expired' || s === 'failed') {
+                    db.updateQrisOrder(refNo, { status: s });
+                }
+            } catch (pollErr) {
+                // Abaikan error sementara koneksi
+            }
+        }
+    }, 15000);
 
     // Graceful termination handling: sync session and shutdown cleanly
     const handleShutdown = async (signal) => {

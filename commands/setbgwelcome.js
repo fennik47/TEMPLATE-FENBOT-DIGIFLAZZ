@@ -4,15 +4,12 @@ const path = require('path');
 module.exports = {
     name: "setbgwelcome",
     run: async (sock, m, { isOwner }) => {
-        // Cek admin/owner
         let isAdmin = false;
         if (m.isGroup) {
             const groupMetadata = await sock.groupMetadata(m.chat);
-            const participants = groupMetadata.participants;
+            const participants = groupMetadata.participants || [];
             const groupAdmins = participants.filter(p => p.admin !== null).map(p => p.id);
             isAdmin = groupAdmins.includes(m.sender);
-        } else {
-            isAdmin = true; // Allow owner in PC
         }
         
         if (!isAdmin && !isOwner) {

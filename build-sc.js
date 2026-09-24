@@ -39,7 +39,7 @@ async function build() {
     // 4. Reset Database
     console.log('[3/5] Mengosongkan data pelanggan, transaksi, & settings...');
     const dbDir = path.join(tempDir, 'database');
-    const databases = ['users.json', 'groups.json', 'transactions.json'];
+    const databases = ['users.json', 'groups.json', 'transactions.json', 'deposits.json', 'qris_orders.json'];
     databases.forEach(db => {
         if (fs.existsSync(path.join(dbDir, db))) {
             fs.writeFileSync(path.join(dbDir, db), '{}');

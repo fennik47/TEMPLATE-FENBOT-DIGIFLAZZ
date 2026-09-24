@@ -53,7 +53,13 @@ Pusat (Seller) untuk produk *${sku}* sedang mengalami gangguan atau stok kosong.
         const adjustedPrice = Math.ceil(product.price * (1 + markup));
 
         if (user.balance < adjustedPrice) {
-            return sock.reply(m.chat, `Saldo tidak cukup!\nHarga: Rp${adjustedPrice.toLocaleString()}\nSaldo Anda: Rp${user.balance.toLocaleString()}\n\nSilakan topup saldo ke admin.`, m);
+            return sock.reply(m.chat, `❌ *Saldo Tidak Cukup!*\n\n` +
+                `• Harga Produk: *Rp${adjustedPrice.toLocaleString()}*\n` +
+                `• Saldo Anda  : *Rp${user.balance.toLocaleString()}*\n\n` +
+                `💡 *Ingin beli langsung tanpa isi saldo dulu?*\n` +
+                `Anda dapat langsung bayar pakai QRIS otomatis:\n` +
+                `👉 Ketik: *.buyqris ${sku} ${target}*\n\n` +
+                `_Atau isi saldo bot terlebih dahulu via *.deposit [nominal]*._`, m);
         }
 
         // Request Confirmation
