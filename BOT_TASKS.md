@@ -40,6 +40,7 @@ Anda cukup menuliskan keinginan Anda di bawah ini, lalu di sesi chat cukup ketik
   - **Kebutuhan**: Menghapus `question("Masukkan pilihan (1/2): ")` yang memblokir proses container di terminal panel Pterodactyl. Otomatisasi proses otentikasi agar sepenuhnya dikendalikan via FENBOT Cloud Website Dashboard (QR streaming & Pairing Code API non-blocking).
   - **File Target**: `index.js`.
   - **Hasil**: Bot dapat langsung menyala secara *headless* tanpa perlu input manual di terminal. QR Code otomatis di-generate dan dikirim ke FENBOT Cloud. Ditambahkan endpoint HTTP `/api/qr` dan `/api/pairing` untuk integrasi dashboard web FENBOT Cloud.
-
-
-
+- [x] **Pemisahan Perintah Deposit QRIS Otomatis (.deposit) & Deposit Transfer Manual (.depomanual)**:
+  - **Kebutuhan**: Memisahkan alur deposit QRIS otomatis dan deposit manual bank/e-wallet yang sebelumnya tercampur di dalam perintah `.deposit`. Menghilangkan fallback diam-diam ke rekening bank agar pengguna tidak bingung mengira `.deposit` adalah alur manual. Menampilkan kedua perintah secara terpisah dan jelas di menu utama.
+  - **File Target**: `commands/deposit.js` (baru), `commands/depomanual.js` (diperbarui), `commands/menu.js`.
+  - **Hasil**: Perintah `.deposit` kini eksklusif menangani pembuatan QRIS otomatis dinamis via MustikaPay (menampilkan petunjuk bila API key belum disetel). Perintah `.depomanual` kini khusus menampilkan rekening/e-wallet admin dan instruksi konfirmasi via `.konfirmasi`. Tampilan `.menu` utama kini memuat kedua perintah tersebut dengan label jelas: `.deposit [nominal] (QRIS Otomatis)` dan `.depomanual [nominal] (Transfer Manual)`.

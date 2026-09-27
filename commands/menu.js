@@ -15,6 +15,7 @@ module.exports = {
 ┃ • .profile
 ┃ • .upgrade (Silver/Gold)
 ┃ • .deposit [nominal] (QRIS Otomatis)
+┃ • .depomanual [nominal] (Transfer Manual)
 ┃ • .cekstatus [ref_no]
 ┃ • .konfirmasi (Bukti TF Manual)
 ┃ • .payment
