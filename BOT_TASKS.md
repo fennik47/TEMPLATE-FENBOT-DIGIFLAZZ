@@ -36,4 +36,10 @@ Anda cukup menuliskan keinginan Anda di bawah ini, lalu di sesi chat cukup ketik
   - **File Target**: `database/deposits.json`, `database/qris_orders.json`, `database/lid_map.json`, `database/manual_products.json`, `database/products.json`, `database/settings.json`, `config/payment.json`, `lib/lidHelper.js`, `lib/serializer.js`, `commands/getlid.js` (dihapus), `commands/menu.js`.
   - **Hasil**: Seluruh database JSON telah bersih (fresh state). JID diproteksi agar tidak pernah terkonversi ke LID. Format nomor telepon Indonesia (08/628) otomatis dinormalisasi ke JID. Perintah `.getlid` telah dihapus sepenuhnya dari bot. Semua pengujian verifikasi 100% lulus.
 
+- [x] **Hapus Prompt Interaktif Pilihan Login (QR / Pairing) di Terminal Pterodactyl**:
+  - **Kebutuhan**: Menghapus `question("Masukkan pilihan (1/2): ")` yang memblokir proses container di terminal panel Pterodactyl. Otomatisasi proses otentikasi agar sepenuhnya dikendalikan via FENBOT Cloud Website Dashboard (QR streaming & Pairing Code API non-blocking).
+  - **File Target**: `index.js`.
+  - **Hasil**: Bot dapat langsung menyala secara *headless* tanpa perlu input manual di terminal. QR Code otomatis di-generate dan dikirim ke FENBOT Cloud. Ditambahkan endpoint HTTP `/api/qr` dan `/api/pairing` untuk integrasi dashboard web FENBOT Cloud.
+
+
 

@@ -20,21 +20,9 @@ const qrcode = require("qrcode-terminal");
 const db = require("./lib/db");
 const fenbot = require("./lib/fenbot");
 
-const question = (text) => {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    return new Promise((resolve) => {
-        rl.question(text, (answer) => {
-            rl.close();
-            resolve(answer);
-        });
-    });
-};
-
 const messageCache = new Set();
 let globalSock = null;
+let currentQrString = null;
 let botStatus = {
     connected: false,
     startedAt: new Date().toISOString(),
@@ -269,6 +257,45 @@ const server = http.createServer((req, res) => {
         }));
     }
 
+    // Endpoint status QR Code untuk FENBOT Cloud Website Dashboard
+    if (req.url === '/api/qr' || req.url === '/api/login/qr') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+            status: botStatus.connected ? 'connected' : (currentQrString ? 'qr_ready' : 'waiting'),
+            qr: currentQrString || null
+        }));
+    }
+
+    // Endpoint Request Pairing Code dari FENBOT Cloud Website Dashboard
+    if (req.url === '/api/pairing' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const phone = (data.phone || data.phoneNumber || data.nomor || '').toString().replace(/[^0-9]/g, '');
+                if (!phone) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'Nomor telepon tidak boleh kosong' }));
+                }
+                if (globalSock && !globalSock.authState.creds.registered) {
+                    const code = await globalSock.requestPairingCode(phone);
+                    console.log(chalk.green.bold(`\n[ PAIRING CLOUD ] Pairing Code: ${code} untuk ${phone}\n`));
+                    await fenbot.sendWhatsAppStatus('CONNECTING', { pairingCode: code, phoneNumber: phone });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'ok', pairingCode: code, phoneNumber: phone }));
+                } else {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'Bot sudah terhubung atau socket belum siap' }));
+                }
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: err.message }));
+            }
+        });
+        return;
+    }
+
     // Webhook Endpoint MustikaPay
     if (req.url === '/api/mustikapay/callback' && req.method === 'POST') {
         let body = '';
@@ -437,13 +464,12 @@ async function startBot() {
 
     sock.ev.on("creds.update", saveCreds);
 
-    let loginChoice = null;
-
     sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (qr && (loginChoice === "1" || !loginChoice || !process.stdin.isTTY)) {
-            console.log(chalk.blue("[ INFO ] Scan QR Code di bawah untuk login:"));
+        if (qr) {
+            currentQrString = qr;
+            console.log(chalk.blue("[ INFO ] Scan QR Code di bawah atau login via FENBOT Cloud:"));
             qrcode.generate(qr, { small: true });
             await fenbot.sendWhatsAppStatus('CONNECTING', { qrString: qr });
         }
@@ -469,6 +495,7 @@ async function startBot() {
                 setTimeout(() => startBot(), 5000);
             }
         } else if (connection === "open") {
+            currentQrString = null;
             botStatus.connected = true;
             botStatus.phone = decodeJid(sock.user?.id || '');
             await fenbot.sendWhatsAppStatus('CONNECTED', { phoneNumber: botStatus.phone });
@@ -527,10 +554,8 @@ async function startBot() {
 
     if (!sock.authState.creds.registered) {
         const envPhone = process.env.PAIRING_NUMBER || process.env.WA_PHONE || process.env.PHONE_NUMBER;
-        const envMethod = process.env.LOGIN_METHOD || (envPhone ? "2" : "");
 
-        if (envMethod === "2" && envPhone) {
-            loginChoice = "2";
+        if (envPhone) {
             const cleanPhone = envPhone.replace(/[^0-9]/g, "");
             console.log(chalk.cyan.bold(`\n[ LOGIN ] Mode Pairing Otomatis untuk nomor: ${cleanPhone}`));
             try {
@@ -541,33 +566,8 @@ async function startBot() {
             } catch (err) {
                 console.error(chalk.red(`[ PAIRING ERROR ] Gagal meminta pairing code: ${err.message}`));
             }
-        } else if (!process.stdin.isTTY || process.env.HEADLESS === "true") {
-            loginChoice = "1";
-            console.log(chalk.blue("\n[ INFO ] Menjalankan mode container / headless, menunggu QR Code..."));
         } else {
-            console.log(chalk.cyan.bold("\n[ LOGIN ] Pilih metode login:"));
-            console.log(chalk.white("1. QR Code"));
-            console.log(chalk.white("2. Pairing Code"));
-
-            loginChoice = await question(chalk.yellow("Masukkan pilihan (1/2): "));
-
-            if (loginChoice === "2") {
-                const phoneNumber = await question(chalk.yellow("Masukkan nomor WhatsApp (contoh: 628xxx): "));
-                if (!phoneNumber) {
-                    console.log(chalk.red("[ ERROR ] Nomor tidak boleh kosong!"));
-                    process.exit();
-                }
-                const cleanNum = phoneNumber.replace(/[^0-9]/g, '');
-                const code = await sock.requestPairingCode(cleanNum);
-                console.log(chalk.green.bold(`\nPairing Code Anda: ${code}\n`));
-                console.log(chalk.white("Masukkan kode di atas pada WhatsApp Anda (Link with Device > Link with Phone Code)\n"));
-                await fenbot.sendWhatsAppStatus('CONNECTING', { pairingCode: code, phoneNumber: cleanNum });
-            } else if (loginChoice === "1") {
-                console.log(chalk.blue("\n[ INFO ] Menunggu QR Code muncul..."));
-            } else {
-                console.log(chalk.red("[ ERROR ] Pilihan tidak valid, default ke QR Code!"));
-                loginChoice = "1";
-            }
+            console.log(chalk.blue("\n[ INFO ] Menunggu otentikasi WhatsApp via FENBOT Cloud (QR Code / Pairing Code)..."));
         }
 
         // Listener perintah konsol untuk trigger pairing code langsung dari Pterodactyl Command
