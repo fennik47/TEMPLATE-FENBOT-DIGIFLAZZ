@@ -19,7 +19,6 @@ module.exports = {
 ┃ • .konfirmasi (Bukti TF Manual)
 ┃ • .payment
 ┃ • .owner
-┃ • .getlid
 ╰────────────────╯
 
 ╭──〔 𝗠𝗘𝗡𝗨 𝗢𝗪𝗡𝗘𝗥 〕──╮
