@@ -25,6 +25,7 @@ module.exports = {
 ╭──〔 𝗠𝗘𝗡𝗨 𝗢𝗪𝗡𝗘𝗥 〕──╮
 ┃ • .digiflazz (saldo)
 ┃ • .updateprice / .up
+┃ • .updatebot (Update GitHub)
 ┃ • .addsaldo [tag/reply]
 ┃ • .setrole
 ┃ • .setprofit

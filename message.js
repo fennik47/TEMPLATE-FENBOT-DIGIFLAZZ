@@ -103,7 +103,8 @@ module.exports = async (sock, m) => {
             return sock.reply(chat, `❓ Perintah *${command}* tidak ditemukan.\n\nKetik *.menu* untuk melihat daftar perintah yang tersedia.`, m);
         }
 
-        if (body && (body.toLowerCase() === "ya" || body.toLowerCase() === "tidak")) {
+        const lowerBody = (body || '').trim().toLowerCase();
+        if (lowerBody === "ya" || lowerBody === "tidak" || lowerBody === "batal" || lowerBody === "cancel") {
             if (global.pendingTopup && global.pendingTopup[sender]) {
                 const data = global.pendingTopup[sender];
                 if (Date.now() - data.timestamp > 300000) {
@@ -111,7 +112,9 @@ module.exports = async (sock, m) => {
                     return sock.reply(chat, "⏰ Waktu konfirmasi telah habis (5 menit).", m);
                 }
                 delete global.pendingTopup[sender];
-                if (body.toLowerCase() === "tidak") return sock.reply(chat, "❌ Pesanan dibatalkan.", m);
+                if (lowerBody === "tidak" || lowerBody === "batal" || lowerBody === "cancel") {
+                    return sock.reply(chat, "❌ Pesanan dibatalkan.", m);
+                }
 
                 const digiflazz = require('./lib/digiflazz');
                 const user = await db.getUserAsync(userId);

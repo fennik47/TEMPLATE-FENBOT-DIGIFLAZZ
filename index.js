@@ -592,26 +592,39 @@ async function startBot() {
 
     sock.ev.on("messages.upsert", async (chatUpdate) => {
         try {
-            if (chatUpdate.type !== 'notify') return;
-            const mek = chatUpdate.messages[0];
-            if (!mek.message) return;
+            if (chatUpdate.type !== 'notify' || !Array.isArray(chatUpdate.messages)) return;
 
-            if (mek.messageTimestamp < startTime) return;
+            for (const mek of chatUpdate.messages) {
+                if (!mek.message) continue;
 
-            const messageId = mek.key.id;
-            if (messageCache.has(messageId)) return;
-            messageCache.add(messageId);
+                const msgTime = typeof mek.messageTimestamp === 'object'
+                    ? (mek.messageTimestamp.low || Number(mek.messageTimestamp))
+                    : Number(mek.messageTimestamp);
 
-            if (messageCache.size > 100) {
-                const firstItem = messageCache.values().next().value;
-                messageCache.delete(firstItem);
+                // Toleransi 10 detik agar pesan saat bot baru terhubung tidak terbuang
+                if (msgTime && msgTime < (startTime - 10)) continue;
+
+                const messageId = mek.key.id;
+                if (messageCache.has(messageId)) continue;
+                messageCache.add(messageId);
+
+                if (messageCache.size > 100) {
+                    const firstItem = messageCache.values().next().value;
+                    messageCache.delete(firstItem);
+                }
+
+                lidHelper.extractFromMessage(sock, mek);
+                try {
+                    await sock.readMessages([mek.key]);
+                } catch {}
+
+                try {
+                    const m = serialize(sock, mek);
+                    await require("./message")(sock, m);
+                } catch (msgErr) {
+                    console.error(chalk.red("[ MSG PROCESS ERROR ] " + msgErr.message));
+                }
             }
-
-            lidHelper.extractFromMessage(sock, mek);
-            await sock.readMessages([mek.key]);
-            const m = serialize(sock, mek);
-            require("./message")(sock, m);
-
         } catch (err) {
             console.log(chalk.red("[ ERROR ] " + err));
         }

@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = {
-    name: "update",
-    aliases: ["gitpull", "updatebot", "pull"],
+    name: "updatebot",
+    aliases: ["update", "gitpull", "pull"],
     run: async (sock, m, { isOwner }) => {
         if (!isOwner) return sock.reply(m.chat, 'Hanya Owner yang bisa memperbarui bot!', m);
 
@@ -34,7 +34,7 @@ module.exports = {
 
             await sock.reply(
                 m.chat,
-                `✅ *Berhasil Update dari GitHub!*\n\nLog Git:\n\`\`\`${output}\`\`\`\n\n♻️ Merestart bot untuk menerapkan pembaruan...`,
+                `✅ *Berhasil Update dari GitHub!*\n\nLog Git:\n\`\`\`${output}\`\`\`\n\n♻️ Merestart bot untuk menerapkan pembaruan...\n_(Catatan: Jika bot tidak otomatis terhubung kembali dalam 10 detik, silakan klik tombol Restart pada panel Pterodactyl Anda.)_`,
                 m
             );
 

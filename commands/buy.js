@@ -20,9 +20,15 @@ module.exports = {
 Gunakan *.topup* untuk melihat daftar SKU yang tersedia.`, m);
         }
 
-        // Anti-spam/Check for existing pending transactions or confirmation
+        // Anti-spam / Cek transaksi pending atau konfirmasi aktif
+        if (global.pendingTopup && global.pendingTopup[jid]) {
+            if (Date.now() - global.pendingTopup[jid].timestamp > 5 * 60 * 1000) {
+                delete global.pendingTopup[jid];
+            }
+        }
+
         if (db.hasPendingTransaction(jid) || (global.pendingTopup && global.pendingTopup[jid])) {
-            return sock.reply(m.chat, `❌ *TRANSAKSI PENDING TERDETEKSI*\n\nMaaf, Anda masih memiliki transaksi yang sedang diproses atau menunggu konfirmasi (*Ya/Tidak*).\n\nSilakan selesaikan konfirmasi sebelumnya atau tunggu hingga transaksi selesai (Sukses/Gagal).`, m);
+            return sock.reply(m.chat, `❌ *TRANSAKSI PENDING TERDETEKSI*\n\nMaaf, Anda masih memiliki transaksi yang sedang diproses atau menunggu konfirmasi (*Ya/Tidak*).\n\nSilakan balas *Ya* untuk lanjut, ketik *Batal* untuk membatalkan konfirmasi, atau tunggu hingga transaksi selesai.`, m);
         }
 
         const product = db.getProduct(sku);
