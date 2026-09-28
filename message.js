@@ -130,22 +130,73 @@ module.exports = async (sock, m) => {
                     
                     if (result.status === 'Gagal') {
                         // Release reservation if Digiflazz fails (Instant Auto-Refund)
-                        await db.releaseReservation(userId, data.price);
+                        await db.releaseReservation(userId, data.price).catch(() => {});
                         db.updateTransaction(refId, { status: 'failed', note: result.message });
-                        return sock.reply(chat, `❌ Gagal: ${result.message}\nSaldo Anda telah dikembalikan secara otomatis.`, m);
+                        return sock.reply(chat, `❌ *Transaksi Gagal:*\n${result.message || 'Ditolak oleh provider'}\n\nSaldo Anda telah dikembalikan secara otomatis.`, m);
                     }
 
                     // 3. Commit debit and record order in FENBOT CLOUD
                     await db.commitDebit(userId, data.price);
                     const updatedUser = await db.getUserAsync(userId);
-                    db.addTransaction(refId, {
+                    const trxRecord = {
                         user: userId, sku: data.sku, product_name: data.product_name, target: data.target,
                         price: data.price, modal: data.modal, balance_before: data.balance_before,
-                        balance_after: updatedUser.balance, status: result.status.toLowerCase(),
-                        note: result.message, chat: data.chat || chat
-                    });
+                        balance_after: updatedUser.balance, status: (result.status || 'pending').toLowerCase(),
+                        note: result.message || '', chat: data.chat || chat, sn: result.sn || ''
+                    };
+                    db.addTransaction(refId, trxRecord);
+
+                    // 4. Kirim respon status ke pembeli
+                    if (result.status === 'Sukses') {
+                        const gsheets = require('./lib/gsheets');
+                        const { createInvoice } = require('./lib/invoice');
+                        gsheets.sendToSheet({ ...trxRecord, status: 'success', sn: result.sn });
+
+                        let successMsg = `🎉 *TRANSAKSI BERHASIL* 🎉\n\n`;
+                        successMsg += `📝 *Detail Transaksi*\n`;
+                        successMsg += `▸ *Order ID :* ${refId}\n`;
+                        successMsg += `▸ *Produk   :* ${data.product_name}\n`;
+                        successMsg += `▸ *Tujuan   :* ${data.target}\n`;
+                        successMsg += `▸ *Status   :* ✅ SUKSES\n`;
+                        successMsg += `▸ *SN/Ref   :* ${result.sn || '-'}\n\n`;
+                        successMsg += `💳 *Informasi Saldo*\n`;
+                        successMsg += `▸ *Harga    :* Rp${data.price.toLocaleString('id-ID')}\n`;
+                        successMsg += `▸ *Sisa Saldo:* Rp${updatedUser.balance.toLocaleString('id-ID')}\n\n`;
+                        successMsg += `_Terima kasih telah berbelanja!_ 🙏`;
+
+                        let isImageSent = false;
+                        try {
+                            const invPath = await createInvoice({ ...trxRecord, sn: result.sn, nickname: result.customer_name });
+                            if (invPath && fs.existsSync(invPath)) {
+                                const imgBuffer = fs.readFileSync(invPath);
+                                await sock.sendMessage(chat, { image: imgBuffer, caption: successMsg });
+                                isImageSent = true;
+                            }
+                        } catch (e) {
+                            console.error('[ ERROR ] Gagal membuat struk:', e.message);
+                        }
+
+                        if (!isImageSent) {
+                            await sock.reply(chat, successMsg, m);
+                        }
+                    } else {
+                        // Status PENDING
+                        let pendingMsg = `⏳ *TRANSAKSI SEDANG DIPROSES* ⏳\n\n`;
+                        pendingMsg += `📝 *Detail Transaksi*\n`;
+                        pendingMsg += `▸ *Order ID :* ${refId}\n`;
+                        pendingMsg += `▸ *Produk   :* ${data.product_name}\n`;
+                        pendingMsg += `▸ *Tujuan   :* ${data.target}\n`;
+                        pendingMsg += `▸ *Status   :* ⏳ PENDING / PROSES\n`;
+                        pendingMsg += `▸ *Pesan    :* ${result.message || 'Sedang diproses oleh provider'}\n\n`;
+                        pendingMsg += `💳 *Informasi Saldo*\n`;
+                        pendingMsg += `▸ *Harga    :* Rp${data.price.toLocaleString('id-ID')}\n`;
+                        pendingMsg += `▸ *Sisa Saldo:* Rp${updatedUser.balance.toLocaleString('id-ID')}\n\n`;
+                        pendingMsg += `_Pesanan sedang diantrekan ke provider. Bukti struk/laporan sukses akan dikirimkan otomatis setelah transaksi selesai._ 🚀`;
+
+                        await sock.reply(chat, pendingMsg, m);
+                    }
                 } catch (err) {
-                    await db.releaseReservation(userId, data.price);
+                    await db.releaseReservation(userId, data.price).catch(() => {});
                     db.updateTransaction(refId, { status: 'failed', note: err.message || 'Kesalahan sistem' });
                     return sock.reply(chat, `❌ Kesalahan sistem: Gagal memproses pesanan (${err.message || 'Error'}). Saldo dikembalikan.`, m);
                 }
