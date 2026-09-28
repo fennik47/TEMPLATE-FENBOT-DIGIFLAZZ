@@ -48,19 +48,33 @@ module.exports = async (sock, m) => {
 
         if (isGroup) {
             try {
-                m.groupMetadata = await sock.groupMetadata(chat);
-                lidHelper.extractFromGroupMetadata(m.groupMetadata);
-                m.participants = (m.groupMetadata.participants || []).map(p => ({
-                    ...p,
-                    jid: lidHelper.toJid(p.jid || p.id),
-                    id: lidHelper.toJid(p.id)
-                }));
-                m.groupAdmins = m.groupMetadata.participants.filter(p => p.admin).map(p => lidHelper.toJid(p.jid || p.id));
-                const botNumber = decodeJid(sock?.user?.id || "").split('@')[0];
-                const senderNumber = sender.split('@')[0];
-                
-                m.isBotAdmin = botNumber ? m.groupAdmins.some(adminJid => adminJid.split('@')[0] === botNumber) : false;
-                m.isAdmin = senderNumber ? m.groupAdmins.some(adminJid => adminJid.split('@')[0] === senderNumber) : false;
+                if (!global.groupMetaCache) global.groupMetaCache = new Map();
+                let meta = null;
+                const cached = global.groupMetaCache.get(chat);
+                if (cached && (Date.now() - cached.time < 5 * 60 * 1000)) {
+                    meta = cached.data;
+                } else {
+                    const fetchPromise = sock.groupMetadata(chat);
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('groupMetadata timeout')), 2500));
+                    meta = await Promise.race([fetchPromise, timeoutPromise]).catch(() => cached?.data || null);
+                    if (meta) global.groupMetaCache.set(chat, { data: meta, time: Date.now() });
+                }
+
+                if (meta) {
+                    m.groupMetadata = meta;
+                    lidHelper.extractFromGroupMetadata(meta);
+                    m.participants = (meta.participants || []).map(p => ({
+                        ...p,
+                        jid: lidHelper.toJid(p.jid || p.id),
+                        id: lidHelper.toJid(p.id)
+                    }));
+                    m.groupAdmins = (meta.participants || []).filter(p => p.admin).map(p => lidHelper.toJid(p.jid || p.id));
+                    const botNumber = decodeJid(sock?.user?.id || "").split('@')[0];
+                    const senderNumber = sender.split('@')[0];
+                    
+                    m.isBotAdmin = botNumber ? m.groupAdmins.some(adminJid => adminJid.split('@')[0] === botNumber) : false;
+                    m.isAdmin = senderNumber ? m.groupAdmins.some(adminJid => adminJid.split('@')[0] === senderNumber) : false;
+                }
             } catch (e) {
                 // Ignore metadata fetch error if bot just joined or network lagged
             }
@@ -89,6 +103,7 @@ module.exports = async (sock, m) => {
             const cmd = require(`./commands/${file}`);
             if (cmd.name === command || (cmd.aliases && cmd.aliases.includes(command))) {
                 isExecuted = true;
+                console.log(chalk.cyan(`[ EXEC ] Executing command: ${command} (${cmd.name}) from ${sender.split('@')[0]}`));
                 try {
                     await cmd.run(sock, m, { args, text, isOwner, config });
                 } catch (err) {

@@ -438,7 +438,7 @@ async function startBot() {
         syncFullHistory: false,
         markOnline: true,
         connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 0,
+        defaultQueryTimeoutMs: 30000,
         keepAliveIntervalMs: 10000,
         getMessage: async () => {
             return { conversation: "" };
