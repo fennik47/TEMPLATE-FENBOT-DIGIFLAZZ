@@ -9,31 +9,79 @@ module.exports = {
         if (!isOwner) return sock.reply(m.chat, 'Hanya Owner yang bisa menambah saldo!', m);
 
         let target = '';
+        let amount = NaN;
+
         if (m.quoted) {
             target = lidHelper.toJid(m.quoted.sender);
+            amount = parseInt(args[0]);
+            if (isNaN(amount) && args[1]) {
+                amount = parseInt(args[1]);
+            }
         } else if (m.msg?.contextInfo?.mentionedJid?.length > 0) {
             target = lidHelper.toJid(m.msg.contextInfo.mentionedJid[0]);
-        } else if (args[0]) {
-            target = lidHelper.toJid(args[0]);
+            amount = parseInt(args[1]);
+            if (isNaN(amount)) {
+                amount = parseInt(args[0]);
+            }
+        } else if (args.length >= 2) {
+            const arg0Num = parseInt(args[0]);
+            const arg1Num = parseInt(args[1]);
+
+            if (args[0].length >= 8 && !isNaN(arg1Num)) {
+                target = lidHelper.toJid(args[0]);
+                amount = arg1Num;
+            } else if (args[1].length >= 8 && !isNaN(arg0Num)) {
+                target = lidHelper.toJid(args[1]);
+                amount = arg0Num;
+            } else {
+                target = lidHelper.toJid(args[0]);
+                amount = arg1Num;
+            }
+        } else if (args.length === 1 && !isNaN(parseInt(args[0]))) {
+            // Owner menambah saldo ke dirinya sendiri: .addsaldo 10000
+            target = lidHelper.toJid(m.sender);
+            amount = parseInt(args[0]);
         }
 
-        const amount = m.quoted ? parseInt(args[0]) : parseInt(args[1]);
         if (!target || isNaN(amount) || amount <= 0) {
-            return sock.reply(m.chat, `❌ *Format Salah!*\n\n*Penggunaan:* .addsaldo [Tag/Reply User] [Jumlah]\n*Contoh:* .addsaldo @62857xxx 50000`, m);
+            return sock.reply(
+                m.chat,
+                `❌ *Format Salah!*\n\n*Cara Penggunaan:*\n` +
+                `• *Tambah saldo sendiri:* .addsaldo 50000\n` +
+                `• *Tambah saldo user:* .addsaldo 62857xxx 50000\n` +
+                `• *Tag user:* .addsaldo @user 50000\n` +
+                `• *Reply pesan user:* .addsaldo 50000`,
+                m
+            );
         }
 
         try {
-            const idempotencyKey = `add_${target.replace(/\D/g, '')}_${amount}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-            const result = await db.creditBalance(target, amount, idempotencyKey);
+            const cleanPhone = target.replace(/\D/g, '');
+            const idempotencyKey = `add_${cleanPhone}_${amount}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+            await db.creditBalance(target, amount, idempotencyKey);
             const user = await db.getUserAsync(target);
 
-            await sock.reply(m.chat, `✅ Berhasil menambah saldo @${target.split('@')[0]} sebesar Rp${amount.toLocaleString()}\nTotal Saldo: Rp${user.balance.toLocaleString()}`, m, { mentions: [target] });
+            const displayUser = target.split('@')[0];
+            await sock.reply(
+                m.chat,
+                `✅ *Berhasil Menambah Saldo!*\n\n` +
+                `• Penerima: @${displayUser}\n` +
+                `• Penambahan: +Rp${amount.toLocaleString('id-ID')}\n` +
+                `• Total Saldo Sekarang: Rp${(user.balance || 0).toLocaleString('id-ID')}`,
+                m,
+                { mentions: [target] }
+            );
 
-            const notifMsg = `📢 *Saldo Anda Telah Ditambah!*\n\n• Penambahan: +Rp${amount.toLocaleString()}\n• Saldo Sekarang: Rp${user.balance.toLocaleString()}`;
-            try {
-                await sock.sendMessage(target, { text: notifMsg });
-            } catch (e) {
-                console.error('[ ADD SALDO NOTIF ] Gagal mengirim pesan ke user:', e.message);
+            const senderJid = lidHelper.toJid(m.sender);
+            if (target !== senderJid) {
+                const notifMsg = `📢 *Saldo Anda Telah Ditambah oleh Owner!*\n\n` +
+                    `• Penambahan: +Rp${amount.toLocaleString('id-ID')}\n` +
+                    `• Saldo Sekarang: Rp${(user.balance || 0).toLocaleString('id-ID')}`;
+                try {
+                    await sock.sendMessage(target, { text: notifMsg });
+                } catch (e) {
+                    console.error('[ ADD SALDO NOTIF ] Gagal mengirim pesan ke user:', e.message);
+                }
             }
         } catch (err) {
             console.error('[ ADD SALDO ERROR ]', err.message);
