@@ -42,10 +42,13 @@ module.exports = {
             }
         }
 
-        // Cek ketersediaan API Key MustikaPay
-        if (!mustikapay.apiKey) {
+        // Cek ketersediaan Kredensial MustikaPay (Username & API Key)
+        if (!mustikapay.apiKey || !mustikapay.username) {
             return sock.reply(m.chat, `⚠️ *LAYANAN QRIS OTOMATIS BELUM AKTIF*\n\n` +
-                `Layanan pembayaran QRIS otomatis (MustikaPay) belum dikonfigurasi atau API Key belum diisi oleh Admin.\n\n` +
+                `Layanan pembayaran QRIS otomatis (MustikaPay) belum dikonfigurasi lengkap.\n` +
+                `Admin harus memasukkan *Username* dan *API Key* MustikaPay melalui:\n` +
+                `• Dashboard FENBOT Cloud pada menu Pengaturan, atau\n` +
+                `• Perintah WhatsApp Owner: \`.setmustika [username] [api_key]\`\n\n` +
                 `💳 *Gunakan Deposit Manual:*\n` +
                 `Silakan gunakan transfer manual ke rekening / e-wallet Admin dengan mengetik:\n` +
                 `👉 *.depomanual ${amount}*\n\n` +
@@ -56,7 +59,10 @@ module.exports = {
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk nominal *Rp${amount.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await mustikapay.createQris(amount);
+            const qrisRes = await mustikapay.createQris(amount, {
+                product_name: 'Deposit Saldo',
+                customer_name: m.pushName || 'Pelanggan'
+            });
 
             if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url) {
                 const refNo = qrisRes.ref_no || qrisRes.reference || `MP${Date.now()}`;
@@ -111,7 +117,7 @@ module.exports = {
             } else {
                 console.error('[ MUSTIKAPAY ERROR ] Response bukan success:', qrisRes);
                 const errMsg = qrisRes.message || 'Layanan QRIS gateway sedang sibuk';
-                await sock.reply(m.chat, `⚠️ *Gagal membuat QRIS Otomatis:* ${errMsg}\n\nSilakan coba lagi nanti atau gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
+                await sock.reply(m.chat, `⚠️ *Gagal membuat QRIS Otomatis:*\n${errMsg}\n\nSilakan pastikan *Username* & *API Key* MustikaPay sudah benar di pengaturan atau gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
             }
         } catch (err) {
             console.error('[ MUSTIKAPAY EXCEPTION ]', err.message);

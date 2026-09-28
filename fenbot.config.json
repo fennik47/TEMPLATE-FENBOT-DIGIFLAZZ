@@ -98,6 +98,14 @@
       "placeholder": "Contoh: Kherul Anam"
     },
     {
+      "key": "mustikapay_username",
+      "label": "MustikaPay Username (QRIS Otomatis)",
+      "type": "string",
+      "required": false,
+      "placeholder": "Contoh: username_anda",
+      "description": "Username akun merchant dari https://mustikapayment.com untuk fitur deposit QRIS otomatis."
+    },
+    {
       "key": "mustikapay_api_key",
       "label": "MustikaPay API Key (QRIS Otomatis)",
       "type": "password",

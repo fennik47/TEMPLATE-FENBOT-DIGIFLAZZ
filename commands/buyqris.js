@@ -38,8 +38,8 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
             return sock.reply(m.chat, `❌ *Produk Sedang Gangguan!*\n\nPusat (Seller) untuk produk *${sku}* sedang mengalami gangguan atau stok habis. Silakan coba beberapa saat lagi.`, m);
         }
 
-        if (!mustikapay.apiKey) {
-            return sock.reply(m.chat, `⚠️ Layanan pembayaran QRIS otomatis belum diaktifkan oleh admin.\n\nSilakan gunakan metode pembelian potong saldo bot dengan mengetik:\n*.buy ${sku} ${target}*`, m);
+        if (!mustikapay.apiKey || !mustikapay.username) {
+            return sock.reply(m.chat, `⚠️ Layanan pembayaran QRIS otomatis (MustikaPay) belum dikonfigurasi lengkap oleh Admin (memerlukan Username & API Key).\n\nSilakan gunakan metode pembelian potong saldo bot dengan mengetik:\n*.buy ${sku} ${target}*`, m);
         }
 
         const settings = db.getSettings();
@@ -52,7 +52,10 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk pembelian *${product.product_name}* seharga *Rp${adjustedPrice.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await mustikapay.createQris(adjustedPrice);
+            const qrisRes = await mustikapay.createQris(adjustedPrice, {
+                product_name: product.product_name,
+                customer_name: m.pushName || 'Pelanggan'
+            });
 
             if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url) {
                 const refNo = qrisRes.ref_no || qrisRes.reference || `MPQ${Date.now()}`;
