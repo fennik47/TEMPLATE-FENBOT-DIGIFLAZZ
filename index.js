@@ -646,8 +646,25 @@ async function startBot() {
         for (const trx of pendingTrx) {
             try {
                 const statusUpdate = await digiflazz.checkStatus(trx.sku, trx.target, trx.id);
+                const statusLower = (statusUpdate.status || '').toLowerCase();
 
-                if (statusUpdate.status === 'Sukses') {
+                console.log(chalk.yellow(`[ LOOP ] Order ${trx.id} (${trx.sku} -> ${trx.target}): Status=${statusUpdate.status || '-'} | Pesan: "${statusUpdate.message || '-'}"`));
+
+                // Di mode Development Digiflazz: jika transaksi sandbox pending > 10 menit, otomatis batalkan & refund agar tidak looping terus
+                const trxAgeMs = trx.time ? (Date.now() - new Date(trx.time).getTime()) : 0;
+                if (digiflazz.isDevelopment && trxAgeMs > 10 * 60 * 1000) {
+                    console.log(chalk.red(`[ LOOP ] Transaksi Sandbox ${trx.id} kadaluarsa (>10 menit pending). Mengembalikan saldo...`));
+                    try {
+                        await db.creditBalance(trx.user, trx.price, `refund_dev_expire_${trx.id}`);
+                    } catch {}
+                    db.updateTransaction(trx.id, {
+                        status: 'failed',
+                        note: 'Kadaluarsa di Sandbox (Target bukan nomor uji coba resmi Digiflazz 087800001230/1232/1233)'
+                    });
+                    continue;
+                }
+
+                if (statusLower === 'sukses' || statusLower === 'success') {
                     const gsheets = require('./lib/gsheets');
                     const { createInvoice } = require('./lib/invoice');
                     db.updateTransaction(trx.id, { status: 'success', sn: statusUpdate.sn });
@@ -701,7 +718,7 @@ async function startBot() {
                         }
                     } catch (e) { console.error('[ ERROR ] Gagal mengirim laporan sukses ke owner', e); }
 
-                } else if (statusUpdate.status === 'Gagal') {
+                } else if (statusLower === 'gagal' || statusLower === 'failed') {
                     try {
                         await db.creditBalance(trx.user, trx.price, `refund_${trx.id}`);
                     } catch (refErr) {

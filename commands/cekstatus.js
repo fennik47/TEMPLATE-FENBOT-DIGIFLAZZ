@@ -18,6 +18,38 @@ module.exports = {
 
         const isOwner = callerIsOwner !== undefined ? callerIsOwner : config.owner.some(v => lidHelper.toJid(v) === jid);
 
+        // 0. Cek apakah ini transaksi pembelian produk via saldo bot (Digiflazz topup)
+        const allTransactions = db.readDB().transactions || {};
+        const trx = allTransactions[refNo] || Object.values(allTransactions).find(t => t.id === refNo || t.id.toLowerCase() === refNo.toLowerCase());
+        if (trx) {
+            const trxOwner = lidHelper.toJid(trx.user);
+            if (trxOwner !== jid && !isOwner) {
+                return sock.reply(m.chat, `🚫 Anda tidak memiliki akses untuk memeriksa transaksi ini.`, m);
+            }
+
+            let statusIcon = '⏳';
+            let statusText = 'SEDANG DIPROSES (PENDING)';
+            if (trx.status === 'success' || trx.status === 'sukses') {
+                statusIcon = '✅';
+                statusText = 'BERHASIL (SUKSES)';
+            } else if (trx.status === 'failed' || trx.status === 'gagal') {
+                statusIcon = '❌';
+                statusText = 'GAGAL (REFUND SALDO)';
+            }
+
+            let msg = `${statusIcon} *STATUS TRANSAKSI DIGIFLAZZ*\n\n`;
+            msg += `• Order ID : *${trx.id}*\n`;
+            msg += `• Produk   : *${trx.product_name || trx.sku}*\n`;
+            msg += `• Tujuan   : *${trx.target}*\n`;
+            msg += `• Harga    : Rp${Number(trx.price).toLocaleString()}\n`;
+            msg += `• Status   : *${statusText}*\n`;
+            if (trx.sn) msg += `• SN / Ref : *${trx.sn}*\n`;
+            if (trx.note) msg += `• Catatan  : ${trx.note}\n`;
+            msg += `• Waktu    : ${trx.time || '-'}\n`;
+
+            return sock.reply(m.chat, msg, m);
+        }
+
         // 1. Cek apakah ini transaksi pembelian produk langsung (qris_orders)
         const qrisOrder = db.getQrisOrder(refNo);
         if (qrisOrder) {

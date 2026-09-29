@@ -37,6 +37,7 @@ module.exports = {
 ┃ • .addrek / .delrek / .addqris
 ┃ • .recap
 ┃ • .checkip
+┃ • .canceltnx / .clearpending
 ┃ • .broadcast [pesan]
 ╰────────────────╯
 
