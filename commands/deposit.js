@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const db = require('../lib/db');
-const mustikapay = require('../lib/mustikapay');
+const arbakti = require('../lib/arbakti');
 const lidHelper = require('../lib/lidHelper');
 
 module.exports = {
@@ -42,13 +42,13 @@ module.exports = {
             }
         }
 
-        // Cek ketersediaan Kredensial MustikaPay (Username & API Key)
-        if (!mustikapay.apiKey || !mustikapay.username) {
+        // Cek ketersediaan API Key Arbakti
+        if (!arbakti.apiKey) {
             return sock.reply(m.chat, `⚠️ *LAYANAN QRIS OTOMATIS BELUM AKTIF*\n\n` +
-                `Layanan pembayaran QRIS otomatis (MustikaPay) belum dikonfigurasi lengkap.\n` +
-                `Admin harus memasukkan *Username* dan *API Key* MustikaPay melalui:\n` +
+                `Layanan pembayaran QRIS otomatis (Arbakti) belum dikonfigurasi oleh Admin.\n` +
+                `Admin harus memasukkan *API Key* Arbakti melalui:\n` +
                 `• Dashboard FENBOT Cloud pada menu Pengaturan, atau\n` +
-                `• Perintah WhatsApp Owner: \`.setmustika [username] [api_key]\`\n\n` +
+                `• Perintah WhatsApp Owner: \`.setarbakti [api_key]\`\n\n` +
                 `💳 *Gunakan Deposit Manual:*\n` +
                 `Silakan gunakan transfer manual ke rekening / e-wallet Admin dengan mengetik:\n` +
                 `👉 *.depomanual ${amount}*\n\n` +
@@ -59,15 +59,15 @@ module.exports = {
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk nominal *Rp${amount.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await mustikapay.createQris(amount, {
-                product_name: 'Deposit Saldo',
-                customer_name: m.pushName || 'Pelanggan'
+            const qrisRes = await arbakti.createQris(amount, {
+                paymentMethod: 'qrisgopay'
             });
 
-            if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url) {
-                const refNo = qrisRes.ref_no || qrisRes.reference || `MP${Date.now()}`;
+            if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url || qrisRes.qr_base64) {
+                const refNo = qrisRes.transactionId || qrisRes.ref_no || `TRX${Date.now()}`;
                 const depositId = `DEP${Date.now()}${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-                const expiresAt = Date.now() + 15 * 60 * 1000; // 15 menit
+                const expiresAt = qrisRes.expiredAt ? new Date(qrisRes.expiredAt).getTime() : (Date.now() + 15 * 60 * 1000);
+                const finalAmount = Number(qrisRes.amount) || amount;
 
                 // Simpan data deposit ke database secara atomic
                 db.addDeposit({
@@ -75,9 +75,10 @@ module.exports = {
                     ref_no: refNo,
                     user: jid,
                     amount: amount,
-                    fee: qrisRes.fee || 0,
-                    total_amount: qrisRes.total_amount || amount,
+                    total_amount: finalAmount,
                     qr_url: qrisRes.qr_url || '',
+                    qr_base64: qrisRes.qr_base64 || '',
+                    payment_url: qrisRes.paymentUrl || '',
                     status: 'pending',
                     createdAt: new Date().toISOString(),
                     expiresAt: new Date(expiresAt).toISOString(),
@@ -86,41 +87,54 @@ module.exports = {
 
                 let caption = `🧾 *TAGIHAN DEPOSIT QRIS OTOMATIS*\n\n`;
                 caption += `• Ref ID    : *${refNo}*\n`;
-                caption += `• Nominal   : *Rp${amount.toLocaleString()}*\n`;
+                caption += `• Total     : *Rp${finalAmount.toLocaleString()}*\n`;
                 caption += `• Status    : ⏳ *PENDING (Menunggu Pembayaran)*\n`;
                 caption += `• Berlaku   : *15 Menit*\n\n`;
                 caption += `📲 *CARA PEMBAYARAN:*\n`;
                 caption += `1. Buka aplikasi M-Banking atau E-Wallet (BCA, Mandiri, BRI, BNI, DANA, GoPay, OVO, ShopeePay, LinkAja).\n`;
                 caption += `2. Scan kode QR di atas.\n`;
-                caption += `3. Pastikan nominal pembayaran sesuai.\n`;
+                caption += `3. Pastikan nominal pembayaran sesuai (*Rp${finalAmount.toLocaleString()}*).\n`;
                 caption += `4. Setelah sukses dibayar, *saldo akan langsung bertambah otomatis* tanpa perlu konfirmasi manual! 🚀\n\n`;
                 caption += `_Jika saldo belum masuk dalam 1 menit setelah bayar, ketik:_\n`;
                 caption += `\`.cekstatus ${refNo}\``;
 
-                if (qrisRes.qr_url) {
+                if (qrisRes.paymentUrl) {
+                    caption += `\n\n🔗 *Link Pembayaran:* ${qrisRes.paymentUrl}`;
+                }
+
+                // Kirim gambar QRIS (prioritaskan Buffer Base64, fallback URL)
+                let imagePayload = null;
+                if (qrisRes.qr_base64) {
+                    try {
+                        const cleanBase64 = qrisRes.qr_base64.replace(/^data:image\/\w+;base64,/, '');
+                        imagePayload = Buffer.from(cleanBase64, 'base64');
+                    } catch {}
+                }
+                if (!imagePayload && qrisRes.qr_url) {
+                    imagePayload = { url: qrisRes.qr_url };
+                }
+
+                if (imagePayload) {
                     try {
                         await sock.sendMessage(m.chat, {
-                            image: { url: qrisRes.qr_url },
+                            image: imagePayload,
                             caption: caption
                         }, { quoted: m });
                         return;
                     } catch (imgErr) {
-                        console.error('[ MUSTIKAPAY QRIS ] Gagal kirim gambar QR, mengirim tautan:', imgErr.message);
-                        caption += `\n\n🔗 *Link QRIS:* ${qrisRes.qr_url}`;
-                        await sock.reply(m.chat, caption, m);
-                        return;
+                        console.error('[ ARBAKTI QRIS ] Gagal kirim gambar QR, mengirim teks:', imgErr.message);
                     }
-                } else {
-                    await sock.reply(m.chat, caption, m);
-                    return;
                 }
+
+                await sock.reply(m.chat, caption, m);
+                return;
             } else {
-                console.error('[ MUSTIKAPAY ERROR ] Response bukan success:', qrisRes);
+                console.error('[ ARBAKTI ERROR ] Response bukan success:', qrisRes);
                 const errMsg = qrisRes.message || 'Layanan QRIS gateway sedang sibuk';
-                await sock.reply(m.chat, `⚠️ *Gagal membuat QRIS Otomatis:*\n${errMsg}\n\nSilakan pastikan *Username* & *API Key* MustikaPay sudah benar di pengaturan atau gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
+                await sock.reply(m.chat, `⚠️ *Gagal membuat QRIS Otomatis:*\n${errMsg}\n\nSilakan pastikan *API Key* Arbakti sudah benar di pengaturan atau gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
             }
         } catch (err) {
-            console.error('[ MUSTIKAPAY EXCEPTION ]', err.message);
+            console.error('[ ARBAKTI EXCEPTION ]', err.message);
             await sock.reply(m.chat, `⚠️ Layanan QRIS otomatis sedang tidak dapat diakses (${err.message}).\n\nSilakan gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
         }
     }

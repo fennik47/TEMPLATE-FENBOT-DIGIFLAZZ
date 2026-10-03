@@ -98,20 +98,12 @@
       "placeholder": "Contoh: Kherul Anam"
     },
     {
-      "key": "mustikapay_username",
-      "label": "MustikaPay Username (QRIS Otomatis)",
-      "type": "string",
-      "required": false,
-      "placeholder": "Contoh: username_anda",
-      "description": "Username akun merchant dari https://mustikapayment.com untuk fitur deposit QRIS otomatis."
-    },
-    {
-      "key": "mustikapay_api_key",
-      "label": "MustikaPay API Key (QRIS Otomatis)",
+      "key": "arbakti_api_key",
+      "label": "Arbakti API Key (QRIS Otomatis)",
       "type": "password",
       "required": false,
-      "placeholder": "MP-USER-XXXXX",
-      "description": "API Key merchant dari https://mustikapayment.com untuk fitur deposit QRIS otomatis."
+      "placeholder": "sb_api_xxxxxxxxxxxxxxxx",
+      "description": "API Key merchant dari https://payment.arbakti.monster untuk fitur deposit QRIS otomatis."
     }
   ]
 }

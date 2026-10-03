@@ -21,9 +21,8 @@ module.exports = {
         username: process.env.DIGIFLAZZ_USERNAME || "",
         apiKey: process.env.DIGIFLAZZ_API_KEY || ""
     },
-    mustikapay: {
-        username: process.env.MUSTIKAPAY_USERNAME || "",
-        apiKey: process.env.MUSTIKAPAY_API_KEY || ""
+    arbakti: {
+        apiKey: process.env.ARBAKTI_API_KEY || ""
     },
     port: process.env.PORT || 3000
 };

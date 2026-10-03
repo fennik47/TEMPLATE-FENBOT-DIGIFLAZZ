@@ -33,7 +33,7 @@ module.exports = {
 ┃ • .addbannermenu
 ┃ • .addbannertopup
 ┃ • .setgsheet
-┃ • .setmustika [user] [apikey]
+┃ • .setarbakti [apikey]
 ┃ • .addrek / .delrek / .addqris
 ┃ • .recap
 ┃ • .checkip

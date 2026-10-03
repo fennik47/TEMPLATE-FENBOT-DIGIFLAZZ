@@ -41,12 +41,12 @@ async function processPaidDeposit(deposit, payload = {}, source = 'webhook') {
     const userJid = deposit.user;
     const idempotencyKey = `dep_credit_${deposit.id || refNo}`;
 
-    console.log(chalk.green(`[ MUSTIKAPAY ] Memproses pembayaran lunas untuk Ref: ${refNo}, User: ${userJid}, Rp${amount.toLocaleString()} via ${source}`));
+    console.log(chalk.green(`[ ARBAKTI ] Memproses pembayaran lunas untuk Ref: ${refNo}, User: ${userJid}, Rp${amount.toLocaleString()} via ${source}`));
 
     try {
         await db.creditBalance(userJid, amount, idempotencyKey);
     } catch (creditErr) {
-        console.error('[ MUSTIKAPAY ] Gagal creditBalance ke FENBOT CLOUD:', creditErr.message);
+        console.error('[ ARBAKTI ] Gagal creditBalance ke FENBOT CLOUD:', creditErr.message);
     }
 
     db.updateDeposit(refNo, {
@@ -73,7 +73,7 @@ async function processPaidDeposit(deposit, payload = {}, source = 'webhook') {
 
             await globalSock.sendMessage(notifyJid, { text: msg });
         } catch (msgErr) {
-            console.error('[ MUSTIKAPAY ] Gagal kirim notifikasi user:', msgErr.message);
+            console.error('[ ARBAKTI ] Gagal kirim notifikasi user:', msgErr.message);
         }
 
         try {
@@ -82,14 +82,14 @@ async function processPaidDeposit(deposit, payload = {}, source = 'webhook') {
             ownerMsg += `▸ *Ref ID :* ${refNo}\n`;
             ownerMsg += `▸ *User   :* @${targetUserJid.split('@')[0]}\n`;
             ownerMsg += `▸ *Nominal:* Rp${amount.toLocaleString()}\n`;
-            ownerMsg += `▸ *Metode :* MustikaPay QRIS (${source})\n`;
+            ownerMsg += `▸ *Metode :* Arbakti QRIS (${source})\n`;
 
             for (let o of config.owner) {
                 const ownerJid = lidHelper.toJid(o);
                 await globalSock.sendMessage(ownerJid, { text: ownerMsg, mentions: [targetUserJid] });
             }
         } catch (ownerErr) {
-            console.error('[ MUSTIKAPAY ] Gagal kirim laporan owner:', ownerErr.message);
+            console.error('[ ARBAKTI ] Gagal kirim laporan owner:', ownerErr.message);
         }
     }
 
@@ -110,13 +110,13 @@ async function processPaidQrisOrder(order, payload = {}, source = 'webhook') {
     const userJid = order.user;
     const idempotencyKey = `qris_order_credit_${orderId}`;
 
-    console.log(chalk.green(`[ MUSTIKAPAY QRIS BUY ] Pembayaran terverifikasi untuk Order: ${orderId}, Ref: ${refNo}, User: ${userJid}, Produk: ${order.product_name} via ${source}`));
+    console.log(chalk.green(`[ ARBAKTI QRIS BUY ] Pembayaran terverifikasi untuk Order: ${orderId}, Ref: ${refNo}, User: ${userJid}, Produk: ${order.product_name} via ${source}`));
 
     // 1. Audit penambahan dana masuk (QRIS) ke PostgreSQL FENBOT CLOUD
     try {
         await db.creditBalance(userJid, amount, idempotencyKey);
     } catch (creditErr) {
-        console.error('[ MUSTIKAPAY QRIS BUY ] Gagal kredit saldo cloud:', creditErr.message);
+        console.error('[ ARBAKTI QRIS BUY ] Gagal kredit saldo cloud:', creditErr.message);
     }
 
     // 2. Update status order menjadi 'process'
@@ -296,12 +296,20 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Webhook Endpoint MustikaPay
-    if (req.url === '/api/mustikapay/callback' && req.method === 'POST') {
+    // Webhook Endpoint Arbakti Payment Gateway
+    const isWebhookUrl = (
+        req.url.startsWith('/api/arbakti/callback') ||
+        req.url.startsWith('/api/payment/callback') ||
+        req.url.startsWith('/api/callback/payment') ||
+        req.url.startsWith('/api/webhooks/arbakti') ||
+        req.url.startsWith('/api/mustikapay/callback')
+    );
+
+    if (isWebhookUrl && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
-            const mustikapay = require('./lib/mustikapay');
+            const arbakti = require('./lib/arbakti');
             const signature = req.headers['x-signature'] || req.headers['signature'] || '';
             let parsed = {};
             try {
@@ -313,23 +321,29 @@ const server = http.createServer((req, res) => {
                 } catch {}
             }
 
-            console.log(chalk.blue(`[ MUSTIKAPAY WEBHOOK ] Diterima callback:`), JSON.stringify(parsed));
+            console.log(chalk.blue(`[ ARBAKTI WEBHOOK ] Diterima callback:`), JSON.stringify(parsed));
 
-            if (signature && mustikapay.apiKey) {
-                const isValid = mustikapay.verifyCallback(body, signature);
+            if (signature && arbakti.apiKey) {
+                const isValid = arbakti.verifyCallback(body, signature);
                 if (!isValid) {
-                    console.warn(chalk.red('[ MUSTIKAPAY WEBHOOK ] Signature tidak valid!'));
+                    console.warn(chalk.red('[ ARBAKTI WEBHOOK ] Signature x-signature tidak valid!'));
                     res.writeHead(401, { 'Content-Type': 'application/json' });
                     return res.end(JSON.stringify({ status: 'error', message: 'Invalid signature' }));
                 }
             }
 
-            const refNo = parsed.ref_no || parsed.reference || parsed.order_id || parsed.id;
-            const status = (parsed.status || '').toLowerCase();
+            // Ekstrak data transaksi sesuai skema Arbakti (event + data.transactionId / status)
+            const refNo = parsed.data?.transactionId || parsed.transactionId || parsed.ref_no || parsed.reference || parsed.id;
+            let status = (parsed.data?.status || parsed.status || '').toLowerCase();
+            if (!status && parsed.event) {
+                if (parsed.event === 'payment.success') status = 'success';
+                else if (parsed.event === 'payment.failed') status = 'failed';
+                else if (parsed.event === 'payment.pending') status = 'pending';
+            }
 
             if (!refNo) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'error', message: 'Missing ref_no' }));
+                return res.end(JSON.stringify({ status: 'error', message: 'Missing transactionId or ref_no' }));
             }
 
             // 1. Cek apakah ini transaksi pembelian produk langsung (qris_orders)
@@ -341,7 +355,7 @@ const server = http.createServer((req, res) => {
                     db.updateQrisOrder(refNo, { status });
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'ok', type: 'qris_order' }));
+                return res.end(JSON.stringify({ success: true, message: 'QRIS order processed' }));
             }
 
             // 2. Cek apakah ini transaksi deposit saldo biasa (deposits)
@@ -353,12 +367,12 @@ const server = http.createServer((req, res) => {
                     db.updateDeposit(refNo, { status });
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'ok', type: 'deposit' }));
+                return res.end(JSON.stringify({ success: true, message: 'Deposit processed' }));
             }
 
-            console.warn(chalk.yellow(`[ MUSTIKAPAY WEBHOOK ] Ref tidak ditemukan: ${refNo}`));
+            console.warn(chalk.yellow(`[ ARBAKTI WEBHOOK ] Ref ID tidak ditemukan di database bot: ${refNo}`));
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ status: 'ok', message: 'Not found locally' }));
+            return res.end(JSON.stringify({ success: true, message: 'Transaction ID not found locally' }));
         });
         return;
     }
@@ -765,10 +779,10 @@ async function startBot() {
         }
     }, 30000);
 
-    // Background Worker: Polling status deposit MustikaPay (QRIS Otomatis) setiap 15 detik
+    // Background Worker: Polling status deposit Arbakti (QRIS Otomatis) setiap 15 detik
     setInterval(async () => {
-        const mustikapay = require('./lib/mustikapay');
-        if (!mustikapay.apiKey) return;
+        const arbakti = require('./lib/arbakti');
+        if (!arbakti.apiKey) return;
 
         // A. Pengecekan deposit saldo biasa
         const pendingDeposits = db.getPendingDeposits();
@@ -793,9 +807,9 @@ async function startBot() {
             // 2. Proteksi konkurensi: lewati jika sedang diproses oleh webhook atau worker lain
             if (dep.isProcessing || dep.status !== 'pending') continue;
 
-            // 3. Cek status ke API MustikaPay
+            // 3. Cek status ke API Arbakti
             try {
-                const statusRes = await mustikapay.checkQrisStatus(refNo);
+                const statusRes = await arbakti.checkQrisStatus(refNo);
                 const s = (statusRes.status || '').toLowerCase();
 
                 if (s === 'success' || s === 'paid' || s === 'settlement') {
@@ -832,9 +846,9 @@ async function startBot() {
             // 2. Proteksi konkurensi: lewati jika sedang diproses
             if (ord.isProcessing || ord.status !== 'pending') continue;
 
-            // 3. Cek status ke API MustikaPay
+            // 3. Cek status ke API Arbakti
             try {
-                const statusRes = await mustikapay.checkQrisStatus(refNo);
+                const statusRes = await arbakti.checkQrisStatus(refNo);
                 const s = (statusRes.status || '').toLowerCase();
 
                 if (s === 'success' || s === 'paid' || s === 'settlement') {

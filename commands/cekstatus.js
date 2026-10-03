@@ -1,5 +1,5 @@
 const db = require('../lib/db');
-const mustikapay = require('../lib/mustikapay');
+const arbakti = require('../lib/arbakti');
 const lidHelper = require('../lib/lidHelper');
 
 module.exports = {
@@ -95,10 +95,10 @@ module.exports = {
                     `_Silakan lakukan pemesanan ulang via *.buyqris*._`, m);
             }
 
-            // Jika status masih pending, cek real-time ke API MustikaPay
-            await sock.reply(m.chat, `⏳ Memeriksa status pembayaran QRIS ke gateway MustikaPay...`, m);
+            // Jika status masih pending, cek real-time ke API Arbakti
+            await sock.reply(m.chat, `⏳ Memeriksa status pembayaran QRIS ke gateway Arbakti...`, m);
             try {
-                const checkRes = await mustikapay.checkQrisStatus(qrisOrder.ref_no || refNo);
+                const checkRes = await arbakti.checkQrisStatus(qrisOrder.ref_no || refNo);
                 const s = (checkRes.status || '').toLowerCase();
                 if (s === 'success' || s === 'paid' || s === 'settlement') {
                     // Trigger manual processing
@@ -152,11 +152,11 @@ module.exports = {
                     `_Silakan hubungi admin jika terdapat kendala._`, m);
             }
 
-            // Jika status masih pending, cek real-time ke API MustikaPay
-            await sock.reply(m.chat, `⏳ Memeriksa status pembayaran ke gateway MustikaPay...`, m);
+            // Jika status masih pending, cek real-time ke API Arbakti
+            await sock.reply(m.chat, `⏳ Memeriksa status pembayaran ke gateway Arbakti...`, m);
 
             try {
-                const checkRes = await mustikapay.checkQrisStatus(deposit.ref_no || refNo);
+                const checkRes = await arbakti.checkQrisStatus(deposit.ref_no || refNo);
                 const statusLower = (checkRes.status || '').toLowerCase();
 
                 if (statusLower === 'success' || statusLower === 'paid' || statusLower === 'settlement') {

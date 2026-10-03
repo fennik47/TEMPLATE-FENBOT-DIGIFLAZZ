@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const db = require('../lib/db');
-const mustikapay = require('../lib/mustikapay');
+const arbakti = require('../lib/arbakti');
 const lidHelper = require('../lib/lidHelper');
 
 module.exports = {
@@ -38,8 +38,8 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
             return sock.reply(m.chat, `❌ *Produk Sedang Gangguan!*\n\nPusat (Seller) untuk produk *${sku}* sedang mengalami gangguan atau stok habis. Silakan coba beberapa saat lagi.`, m);
         }
 
-        if (!mustikapay.apiKey || !mustikapay.username) {
-            return sock.reply(m.chat, `⚠️ Layanan pembayaran QRIS otomatis (MustikaPay) belum dikonfigurasi lengkap oleh Admin (memerlukan Username & API Key).\n\nSilakan gunakan metode pembelian potong saldo bot dengan mengetik:\n*.buy ${sku} ${target}*`, m);
+        if (!arbakti.apiKey) {
+            return sock.reply(m.chat, `⚠️ Layanan pembayaran QRIS otomatis (Arbakti) belum dikonfigurasi lengkap oleh Admin (memerlukan API Key).\n\nSilakan gunakan metode pembelian potong saldo bot dengan mengetik:\n*.buy ${sku} ${target}*`, m);
         }
 
         const settings = db.getSettings();
@@ -52,15 +52,15 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk pembelian *${product.product_name}* seharga *Rp${adjustedPrice.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await mustikapay.createQris(adjustedPrice, {
-                product_name: product.product_name,
-                customer_name: m.pushName || 'Pelanggan'
+            const qrisRes = await arbakti.createQris(adjustedPrice, {
+                paymentMethod: 'qrisgopay'
             });
 
-            if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url) {
-                const refNo = qrisRes.ref_no || qrisRes.reference || `MPQ${Date.now()}`;
+            if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url || qrisRes.qr_base64) {
+                const refNo = qrisRes.transactionId || qrisRes.ref_no || `TRXQ${Date.now()}`;
                 const orderId = `QTRX${Date.now()}${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-                const expiresAt = Date.now() + 15 * 60 * 1000; // 15 menit
+                const expiresAt = qrisRes.expiredAt ? new Date(qrisRes.expiredAt).getTime() : (Date.now() + 15 * 60 * 1000);
+                const finalAmount = Number(qrisRes.amount) || adjustedPrice;
 
                 // Catat pesanan QRIS ke database
                 db.addQrisOrder({
@@ -71,8 +71,11 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
                     product_name: product.product_name,
                     target: target,
                     price: adjustedPrice,
+                    total_amount: finalAmount,
                     modal: product.price,
                     qr_url: qrisRes.qr_url || '',
+                    qr_base64: qrisRes.qr_base64 || '',
+                    payment_url: qrisRes.paymentUrl || '',
                     status: 'pending',
                     type: 'direct_purchase',
                     createdAt: new Date().toISOString(),
@@ -85,39 +88,53 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
                 caption += `• Ref No    : *${refNo}*\n`;
                 caption += `• Produk    : *${product.product_name}*\n`;
                 caption += `• Tujuan    : *${target}*\n`;
-                caption += `• Total Bayar: *Rp${adjustedPrice.toLocaleString()}*\n`;
+                caption += `• Total Bayar: *Rp${finalAmount.toLocaleString()}*\n`;
                 caption += `• Status    : ⏳ *PENDING (Menunggu Pembayaran)*\n`;
                 caption += `• Batas Waktu: *15 Menit*\n\n`;
                 caption += `📲 *CARA PEMBAYARAN:*\n`;
                 caption += `1. Buka M-Banking atau E-Wallet (BCA, Mandiri, BRI, BNI, DANA, GoPay, OVO, ShopeePay).\n`;
                 caption += `2. Scan kode QR di atas.\n`;
-                caption += `3. Selesaikan pembayaran sebesar *Rp${adjustedPrice.toLocaleString()}*.\n`;
+                caption += `3. Selesaikan pembayaran sebesar *Rp${finalAmount.toLocaleString()}*.\n`;
                 caption += `4. Begitu lunas, sistem akan *langsung otomatis memproses* pesanan ke nomor tujuan Anda! 🚀\n\n`;
                 caption += `_Jika telah bayar dan belum terproses dalam 1 menit, ketik:_\n`;
                 caption += `\`.cekstatus ${refNo}\``;
 
-                if (qrisRes.qr_url) {
+                if (qrisRes.paymentUrl) {
+                    caption += `\n\n🔗 *Link Pembayaran:* ${qrisRes.paymentUrl}`;
+                }
+
+                // Kirim gambar QRIS (prioritaskan Base64, fallback URL)
+                let imagePayload = null;
+                if (qrisRes.qr_base64) {
+                    try {
+                        const cleanBase64 = qrisRes.qr_base64.replace(/^data:image\/\w+;base64,/, '');
+                        imagePayload = Buffer.from(cleanBase64, 'base64');
+                    } catch {}
+                }
+                if (!imagePayload && qrisRes.qr_url) {
+                    imagePayload = { url: qrisRes.qr_url };
+                }
+
+                if (imagePayload) {
                     try {
                         await sock.sendMessage(m.chat, {
-                            image: { url: qrisRes.qr_url },
+                            image: imagePayload,
                             caption: caption
                         }, { quoted: m });
                         return;
                     } catch (imgErr) {
-                        caption += `\n\n🔗 *Link QRIS:* ${qrisRes.qr_url}`;
-                        await sock.reply(m.chat, caption, m);
-                        return;
+                        console.error('[ ARBAKTI BUYQRIS ] Gagal kirim gambar QR, mengirim teks:', imgErr.message);
                     }
-                } else {
-                    await sock.reply(m.chat, caption, m);
-                    return;
                 }
+
+                await sock.reply(m.chat, caption, m);
+                return;
             } else {
                 const errMsg = qrisRes.message || 'Layanan QRIS sedang gangguan';
                 await sock.reply(m.chat, `❌ Gagal membuat QRIS: ${errMsg}.\n\nAnda dapat membeli via Saldo Bot: *.buy ${sku} ${target}*`, m);
             }
         } catch (err) {
-            console.error('[ BUYQRIS ERROR ]', err.message);
+            console.error('[ ARBAKTI BUYQRIS ERROR ]', err.message);
             await sock.reply(m.chat, `❌ Terjadi kesalahan saat membuat QRIS: ${err.message}`, m);
         }
     }
