@@ -779,10 +779,16 @@ async function startBot() {
         }
     }, 30000);
 
-    // Background Worker: Polling status deposit Arbakti (QRIS Otomatis) setiap 15 detik
+    // Background Worker: Polling status deposit Arbakti (QRIS Otomatis) setiap 10 detik
     setInterval(async () => {
         const arbakti = require('./lib/arbakti');
         if (!arbakti.apiKey) return;
+
+        const isSuccessStatus = (statusStr) => {
+            if (!statusStr) return false;
+            const norm = String(statusStr).toLowerCase().trim();
+            return ['success', 'paid', 'settlement', 'settled', 'sukses', 'berhasil', 'lunas', 'completed', 'done'].includes(norm);
+        };
 
         // A. Pengecekan deposit saldo biasa
         const pendingDeposits = db.getPendingDeposits();
@@ -810,15 +816,18 @@ async function startBot() {
             // 3. Cek status ke API Arbakti
             try {
                 const statusRes = await arbakti.checkQrisStatus(refNo);
-                const s = (statusRes.status || '').toLowerCase();
+                const s = (statusRes.status || statusRes.rawStatus || '').toLowerCase();
+                
+                console.log(chalk.cyan(`[ ARBAKTI POLLING ] Deposit ${refNo} (Rp${Number(dep.amount).toLocaleString()}) -> Status: ${s || 'tidak diketahui'}`));
 
-                if (s === 'success' || s === 'paid' || s === 'settlement') {
+                if (isSuccessStatus(s)) {
+                    console.log(chalk.green.bold(`[ ARBAKTI POLLING ] Deposit ${refNo} terdeteksi LUNAS (${s})! Mengkreditkan saldo...`));
                     await processPaidDeposit(dep, statusRes, 'polling');
                 } else if (s === 'expired' || s === 'failed') {
                     db.updateDeposit(refNo, { status: s });
                 }
             } catch (pollErr) {
-                // Abaikan error sementara koneksi
+                console.warn(chalk.yellow(`[ ARBAKTI POLLING ] Gagal cek status ${refNo}: ${pollErr.message}`));
             }
         }
 
@@ -849,18 +858,21 @@ async function startBot() {
             // 3. Cek status ke API Arbakti
             try {
                 const statusRes = await arbakti.checkQrisStatus(refNo);
-                const s = (statusRes.status || '').toLowerCase();
+                const s = (statusRes.status || statusRes.rawStatus || '').toLowerCase();
 
-                if (s === 'success' || s === 'paid' || s === 'settlement') {
+                console.log(chalk.cyan(`[ ARBAKTI POLLING ] Order QRIS ${refNo} (${ord.product_name}) -> Status: ${s || 'tidak diketahui'}`));
+
+                if (isSuccessStatus(s)) {
+                    console.log(chalk.green.bold(`[ ARBAKTI POLLING ] Order ${refNo} terdeteksi LUNAS (${s})! Memproses ke Digiflazz...`));
                     await processPaidQrisOrder(ord, statusRes, 'polling');
                 } else if (s === 'expired' || s === 'failed') {
                     db.updateQrisOrder(refNo, { status: s });
                 }
             } catch (pollErr) {
-                // Abaikan error sementara koneksi
+                console.warn(chalk.yellow(`[ ARBAKTI POLLING ] Gagal cek status ${refNo}: ${pollErr.message}`));
             }
         }
-    }, 15000);
+    }, 10000);
 
     // Graceful termination handling: sync session and shutdown cleanly
     const handleShutdown = async (signal) => {

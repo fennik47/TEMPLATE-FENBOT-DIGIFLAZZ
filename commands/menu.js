@@ -40,6 +40,7 @@ module.exports = {
 ┃ • .recap
 ┃ • .checkip
 ┃ • .canceltnx / .clearpending
+┃ • .accdepo [ref]
 ┃ • .broadcast [pesan]
 ╰────────────────╯
 

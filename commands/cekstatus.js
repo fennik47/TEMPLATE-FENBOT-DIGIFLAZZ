@@ -157,9 +157,10 @@ module.exports = {
 
             try {
                 const checkRes = await arbakti.checkQrisStatus(deposit.ref_no || refNo);
-                const statusLower = (checkRes.status || '').toLowerCase();
+                const statusLower = (checkRes.status || checkRes.rawStatus || '').toLowerCase();
+                const isPaid = ['success', 'paid', 'settlement', 'settled', 'sukses', 'berhasil', 'lunas', 'completed', 'done'].includes(statusLower);
 
-                if (statusLower === 'success' || statusLower === 'paid' || statusLower === 'settlement') {
+                if (isPaid) {
                     if (deposit.status !== 'paid' && !deposit.isProcessing) {
                         deposit.isProcessing = true;
                         try {
@@ -194,11 +195,17 @@ module.exports = {
                     db.updateDeposit(deposit.ref_no || deposit.id, { status: 'expired' });
                     return sock.reply(m.chat, `⏰ Tagihan ini telah kadaluarsa (*EXPIRED*). Silakan buat transaksi baru via *.deposit*.`, m);
                 } else {
-                    return sock.reply(m.chat, `⏳ *STATUS: BELUM DIBAYAR (PENDING)*\n\n` +
-                        `• Ref ID   : *${deposit.ref_no || deposit.id}*\n` +
-                        `• Nominal  : *Rp${Number(deposit.amount).toLocaleString()}*\n` +
-                        `• Status   : ⏳ *Menunggu Pembayaran*\n\n` +
-                        `_Sistem belum mendeteksi pembayaran masuk. Harap selesaikan pembayaran melalui scan QRIS Anda._`, m);
+                    let pendingMsg = `⏳ *STATUS: MENUNGGU PEMBAYARAN (PENDING)*\n\n`;
+                    pendingMsg += `• Ref ID        : *${deposit.ref_no || deposit.id}*\n`;
+                    pendingMsg += `• Nominal       : *Rp${Number(deposit.amount).toLocaleString()}*\n`;
+                    if (deposit.total_amount && deposit.total_amount !== deposit.amount) {
+                        pendingMsg += `• Total Ditransfer: *Rp${Number(deposit.total_amount).toLocaleString()}* (Kode Unik)\n`;
+                    }
+                    pendingMsg += `• Status Gateway: ⏳ *${(checkRes.rawStatus || checkRes.status || 'PENDING').toUpperCase()}*\n\n`;
+                    pendingMsg += `_Sistem bot mengecek status pembayaran secara otomatis setiap 10 detik._\n\n`;
+                    pendingMsg += `💡 *Catatan:* Jika saldo sudah masuk ke DANA tetapi gateway belum mengubah status, notifikasi e-wallet sedang diproses.\n`;
+                    pendingMsg += `👉 *Owner Bot:* Ketik \`.accdepo ${deposit.ref_no || deposit.id}\` untuk verifikasi instan.`;
+                    return sock.reply(m.chat, pendingMsg, m);
                 }
             } catch (err) {
                 return sock.reply(m.chat, `⚠️ Gagal memeriksa status ke gateway: ${err.message}`, m);
