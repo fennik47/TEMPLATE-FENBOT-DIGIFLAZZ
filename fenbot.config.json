@@ -106,12 +106,12 @@
       "description": "API Key merchant dari https://payment.arbakti.monster untuk fitur deposit QRIS otomatis."
     },
     {
-      "key": "arbakti_method",
-      "label": "ID Metode QRIS Arbakti (Opsional)",
+      "key": "arbakti_app_id",
+      "label": "ID Aplikasi QRIS Arbakti",
       "type": "string",
       "required": false,
-      "placeholder": "Kosongkan untuk otomatis (misal: qris, qrisgopay)",
-      "description": "ID metode QRIS dari Arbakti. Biarkan kosong agar sistem mendeteksi otomatis metode QRIS yang aktif di akun Anda."
+      "placeholder": "Contoh: kris, qrispoetry, qrisarfy",
+      "description": "ID Aplikasi dari menu Pattern Notifikasi di https://payment.arbakti.monster agar QRIS yang digenerate sesuai dengan akun/toko Anda (membedakan multi-user/multi-bot)."
     }
   ]
 }

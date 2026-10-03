@@ -22,7 +22,8 @@ module.exports = {
         apiKey: process.env.DIGIFLAZZ_API_KEY || ""
     },
     arbakti: {
-        apiKey: process.env.ARBAKTI_API_KEY || ""
+        apiKey: process.env.ARBAKTI_API_KEY || "",
+        appId: process.env.ARBAKTI_APP_ID || process.env.ARBAKTI_PAYMENT_METHOD || ""
     },
     port: process.env.PORT || 3000
 };

@@ -33,7 +33,8 @@ module.exports = {
 ┃ • .addbannermenu
 ┃ • .addbannertopup
 ┃ • .setgsheet
-┃ • .setarbakti [apikey]
+┃ • .setarbakti [apikey] [id_app]
+┃ • .setapp [id_aplikasi]
 ┃ • .cekarbakti / .listpayment
 ┃ • .addrek / .delrek / .addqris
 ┃ • .recap
