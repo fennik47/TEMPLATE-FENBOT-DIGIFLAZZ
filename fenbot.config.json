@@ -104,6 +104,14 @@
       "required": false,
       "placeholder": "sb_api_xxxxxxxxxxxxxxxx",
       "description": "API Key merchant dari https://payment.arbakti.monster untuk fitur deposit QRIS otomatis."
+    },
+    {
+      "key": "arbakti_method",
+      "label": "ID Metode QRIS Arbakti (Opsional)",
+      "type": "string",
+      "required": false,
+      "placeholder": "Kosongkan untuk otomatis (misal: qris, qrisgopay)",
+      "description": "ID metode QRIS dari Arbakti. Biarkan kosong agar sistem mendeteksi otomatis metode QRIS yang aktif di akun Anda."
     }
   ]
 }

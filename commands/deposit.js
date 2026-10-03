@@ -59,9 +59,7 @@ module.exports = {
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk nominal *Rp${amount.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await arbakti.createQris(amount, {
-                paymentMethod: 'qrisgopay'
-            });
+            const qrisRes = await arbakti.createQris(amount);
 
             if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url || qrisRes.qr_base64) {
                 const refNo = qrisRes.transactionId || qrisRes.ref_no || `TRX${Date.now()}`;
@@ -131,7 +129,12 @@ module.exports = {
             } else {
                 console.error('[ ARBAKTI ERROR ] Response bukan success:', qrisRes);
                 const errMsg = qrisRes.message || 'Layanan QRIS gateway sedang sibuk';
-                await sock.reply(m.chat, `⚠️ *Gagal membuat QRIS Otomatis:*\n${errMsg}\n\nSilakan pastikan *API Key* Arbakti sudah benar di pengaturan atau gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`, m);
+                let failReply = `⚠️ *Gagal membuat QRIS Otomatis:*\n${errMsg}\n\n`;
+                if (errMsg.toLowerCase().includes('tidak aktif') || errMsg.toLowerCase().includes('metode')) {
+                    failReply += `💡 _Untuk Owner: Ketik *.cekarbakti* untuk memeriksa metode pembayaran yang aktif di akun Arbakti Anda._\n\n`;
+                }
+                failReply += `Silakan gunakan deposit transfer manual:\n👉 *.depomanual ${amount}*`;
+                await sock.reply(m.chat, failReply, m);
             }
         } catch (err) {
             console.error('[ ARBAKTI EXCEPTION ]', err.message);

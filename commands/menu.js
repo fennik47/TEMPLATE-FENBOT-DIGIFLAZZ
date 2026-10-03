@@ -34,6 +34,7 @@ module.exports = {
 ┃ • .addbannertopup
 ┃ • .setgsheet
 ┃ • .setarbakti [apikey]
+┃ • .cekarbakti / .listpayment
 ┃ • .addrek / .delrek / .addqris
 ┃ • .recap
 ┃ • .checkip

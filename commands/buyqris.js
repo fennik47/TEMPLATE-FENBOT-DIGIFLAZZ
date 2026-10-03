@@ -52,9 +52,7 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
         await sock.reply(m.chat, `⏳ Sedang membuat tagihan QRIS untuk pembelian *${product.product_name}* seharga *Rp${adjustedPrice.toLocaleString()}*...`, m);
 
         try {
-            const qrisRes = await arbakti.createQris(adjustedPrice, {
-                paymentMethod: 'qrisgopay'
-            });
+            const qrisRes = await arbakti.createQris(adjustedPrice);
 
             if (qrisRes.status === 'success' || qrisRes.status === 'pending' || qrisRes.qr_url || qrisRes.qr_base64) {
                 const refNo = qrisRes.transactionId || qrisRes.ref_no || `TRXQ${Date.now()}`;
@@ -131,7 +129,12 @@ Gunakan *.topup* untuk melihat daftar SKU produk yang tersedia.`, m);
                 return;
             } else {
                 const errMsg = qrisRes.message || 'Layanan QRIS sedang gangguan';
-                await sock.reply(m.chat, `❌ Gagal membuat QRIS: ${errMsg}.\n\nAnda dapat membeli via Saldo Bot: *.buy ${sku} ${target}*`, m);
+                let failReply = `❌ *Gagal membuat QRIS:*\n${errMsg}\n\n`;
+                if (errMsg.toLowerCase().includes('tidak aktif') || errMsg.toLowerCase().includes('metode')) {
+                    failReply += `💡 _Untuk Owner: Ketik *.cekarbakti* untuk memeriksa metode pembayaran yang aktif di akun Arbakti._\n\n`;
+                }
+                failReply += `Anda dapat membeli via Saldo Bot: *.buy ${sku} ${target}*`;
+                await sock.reply(m.chat, failReply, m);
             }
         } catch (err) {
             console.error('[ ARBAKTI BUYQRIS ERROR ]', err.message);
